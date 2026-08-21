@@ -1,3 +1,5 @@
+import os
+
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
@@ -7,8 +9,13 @@ import io
 # --- Configuration & Setup ---
 st.set_page_config(page_title="AI Void Deck Makeover", layout="wide")
 
-# Insert your Hugging Face Token here (starts with hf_)
-API_TOKEN = "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" 
+from dotenv import load_dotenv
+
+# Load the variables from the .env file
+load_dotenv()
+
+# Access the token securely
+API_TOKEN = os.getenv("API_TOKEN")
 
 # Updated Hugging Face Router URL for the supported v1.5 Inpainting model
 API_URL = "https://router.huggingface.co/hf-inference/models/stable-diffusion-v1-5/stable-diffusion-inpainting"
