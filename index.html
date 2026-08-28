@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GrooveAI - AI Dance Studio & Video Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- Ambient Grid Background -->
+  <div class="bg-grid-overlay"></div>
+
+  <div class="app-container">
+    <!-- Top Header & Stepper -->
+    <header class="app-header">
+      <a href="#" class="brand" onclick="location.reload(); return false;">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        </div>
+        <div class="brand-text">Groove<span>AI</span></div>
+      </a>
+
+      <!-- 5-Step Clickable Progress Indicator -->
+      <nav class="stepper-nav" aria-label="Creation Progress">
+        <div class="step-indicator active" data-step="1">
+          <span class="step-num">1</span>
+          <span class="step-label">Upload</span>
+        </div>
+        <div class="step-indicator" data-step="2">
+          <span class="step-num">2</span>
+          <span class="step-label">Record & Style</span>
+        </div>
+        <div class="step-indicator" data-step="3">
+          <span class="step-num">3</span>
+          <span class="step-label">AI Processing</span>
+        </div>
+        <div class="step-indicator" data-step="4">
+          <span class="step-num">4</span>
+          <span class="step-label">Dance Video</span>
+        </div>
+        <div class="step-indicator" data-step="5">
+          <span class="step-num">5</span>
+          <span class="step-label">QR & Share</span>
+        </div>
+      </nav>
+    </header>
+
+    <!-- ====================================================================
+         PAGE 1 – UPLOAD MEDIA
+         ==================================================================== -->
+    <section id="page-1" class="page-stage active">
+      <div class="glass-panel">
+        <div class="hero-header">
+          <div class="badge-pill">⚡ Neural Motion Diffusion 2.0</div>
+          <h1 class="hero-title">Turn Any Photo or Video Into <span class="gradient-text">Epic Dance Moves</span></h1>
+          <p class="hero-subtitle">Upload a photo or video of anyone, choose your favourite dance groove, and let our generative AI choreograph the dance instantly.</p>
+        </div>
+
+        <!-- Hidden input for file picker -->
+        <input type="file" id="media-file-input" accept="image/*,video/*" style="display: none;" />
+
+        <!-- Drag & Drop Zone -->
+        <div id="upload-dropzone" class="upload-dropzone">
+          <div class="upload-icon-wrap">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+          </div>
+          <h2 class="upload-title">Upload a photo or video to get started</h2>
+          <p class="upload-sub">Drag and drop your file here, or click to browse files</p>
+          <div class="format-tags">
+            <span class="tag">JPG</span>
+            <span class="tag">PNG</span>
+            <span class="tag">MP4</span>
+            <span class="tag">WEBM</span>
+            <span class="tag">MOV</span>
+            <span class="tag">Max 50MB</span>
+          </div>
+        </div>
+
+        <!-- Uploaded Media Preview Card -->
+        <div id="upload-preview-card" class="upload-preview-card">
+          <img id="preview-thumbnail" class="preview-thumbnail" src="" alt="Media Preview" />
+          <div class="preview-info">
+            <div id="preview-filename" class="preview-filename">uploaded-person.jpg</div>
+            <div id="preview-meta" class="preview-meta"><span>IMAGE</span> • <span>2.4 MB</span></div>
+          </div>
+          <button id="remove-upload-btn" class="preview-remove-btn" type="button" title="Remove file">
+            ✕ Remove
+          </button>
+        </div>
+
+        <!-- Instant Preset Avatars -->
+        <div class="preset-section">
+          <div class="preset-title">Or test immediately with a sample avatar:</div>
+          <div class="preset-grid">
+            <button class="preset-btn" data-preset="guy" type="button">
+              <span>🕺</span> Cyber Dancer
+            </button>
+            <button class="preset-btn" data-preset="girl" type="button">
+              <span>💃</span> Pop Star
+            </button>
+            <button class="preset-btn" data-preset="dancer" type="button">
+              <span>⚡</span> B-Boy Pro
+            </button>
+            <button class="preset-btn" data-preset="robot" type="button">
+              <span>🤖</span> Android Bot
+            </button>
+          </div>
+        </div>
+
+        <!-- Action Row -->
+        <div class="action-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <button id="quick-demo-btn" class="btn btn-secondary" type="button">
+            ⚡ Quick Demo Mode (Skip Upload)
+          </button>
+          <button id="page-1-continue-btn" class="btn btn-primary btn-lg" type="button">
+            Continue to Record & Choose Dance →
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         PAGE 2 – RECORD VIDEO & CHOOSE DANCE
+         ==================================================================== -->
+    <section id="page-2" class="page-stage">
+      <div class="glass-panel">
+        <div class="record-dance-container">
+          
+          <!-- Section A: Camera Recorder -->
+          <div class="camera-record-section">
+            <div class="section-headline">
+              <h3>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2">
+                  <path d="M23 7l-7 5 7 5V7z"></path>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+                Record Live Video or Use Uploaded Media
+              </h3>
+              <p>Record a quick video using your camera for optimal full-body motion capture, or proceed with your uploaded media.</p>
+              <div id="use-uploaded-notice" style="display:none; margin-top: 10px; color: var(--accent-cyan); font-size: 0.88rem;"></div>
+            </div>
+
+            <!-- Viewfinder Frame -->
+            <div class="camera-view-wrapper">
+              <video id="camera-preview-video" class="camera-video" autoplay playsinline muted></video>
+
+              <!-- Live HUD -->
+              <div class="camera-hud">
+                <div class="hud-top">
+                  <div id="camera-rec-badge" class="record-badge">
+                    <span class="rec-dot"></span>
+                    <span class="rec-timer" id="camera-rec-timer">00:00</span>
+                  </div>
+                  <button id="flip-camera-btn" class="camera-flip-btn" type="button" title="Flip Camera">
+                    ↻
+                  </button>
+                </div>
+                <div class="camera-guidelines"></div>
+              </div>
+
+              <!-- Camera Initial Placeholder / Permissions Prompt -->
+              <div id="camera-placeholder" class="camera-placeholder">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="1.8">
+                  <path d="M23 7l-7 5 7 5V7z"></path>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+                <p>Click below to activate device camera</p>
+                <button id="start-camera-stream-btn" class="btn btn-secondary" type="button">
+                  📷 Enable Camera
+                </button>
+              </div>
+            </div>
+
+            <!-- Camera Controls Bar -->
+            <div class="camera-controls-bar">
+              <button id="start-record-btn" class="btn btn-danger" type="button" style="display: none;">
+                ⏺ Start Recording
+              </button>
+              <button id="stop-record-btn" class="btn btn-secondary" type="button" style="display: none;">
+                ⏹ Stop Recording
+              </button>
+              <button id="retake-record-btn" class="btn btn-secondary" type="button" style="display: none;">
+                🔄 Retake Video
+              </button>
+              <button id="use-record-btn" class="btn btn-primary" type="button" style="display: none;">
+                ✓ Use Recorded Video
+              </button>
+            </div>
+          </div>
+
+          <hr style="border: 0; border-top: 1px solid var(--border-color);" />
+
+          <!-- Section B: 4 Dance Styles -->
+          <div class="dance-selection-section">
+            <div class="section-headline">
+              <h3>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-pink)" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polygon points="10 8 16 12 10 16 10 8"></polygon>
+                </svg>
+                Choose Dance Style
+              </h3>
+              <p>Select the choreography style you want the AI to apply to your video.</p>
+            </div>
+
+            <div class="dance-grid">
+              <!-- Dance Card 1 -->
+              <div class="dance-card selected" data-style="cyber_hiphop">
+                <div>
+                  <div class="dance-card-header">
+                    <div class="dance-avatar-icon">🕺</div>
+                    <div class="dance-selected-badge">✓</div>
+                  </div>
+                  <h4 class="dance-title">Cyber Hip-Hop</h4>
+                  <div class="dance-meta">⚡ 128 BPM • Popping & Waves</div>
+                  <p class="dance-desc">High-energy robotic popping, arm wave dynamics, and futuristic cyber glow trails.</p>
+                </div>
+              </div>
+
+              <!-- Dance Card 2 -->
+              <div class="dance-card" data-style="salsa_fiesta">
+                <div>
+                  <div class="dance-card-header">
+                    <div class="dance-avatar-icon">💃</div>
+                    <div class="dance-selected-badge">✓</div>
+                  </div>
+                  <h4 class="dance-title">Salsa Fiesta</h4>
+                  <div class="dance-meta">🔥 105 BPM • Latin Groove</div>
+                  <p class="dance-desc">Rhythmic hip sway, syncopated cross-body footwork, and fluid passionate spins.</p>
+                </div>
+              </div>
+
+              <!-- Dance Card 3 -->
+              <div class="dance-card" data-style="kpop_idol">
+                <div>
+                  <div class="dance-card-header">
+                    <div class="dance-avatar-icon">✨</div>
+                    <div class="dance-selected-badge">✓</div>
+                  </div>
+                  <h4 class="dance-title">K-Pop Idol</h4>
+                  <div class="dance-meta">💖 132 BPM • Point Choreo</div>
+                  <p class="dance-desc">Ultra-crisp synchronized point choreography, heart poses, and radiant idol sparkles.</p>
+                </div>
+              </div>
+
+              <!-- Dance Card 4 -->
+              <div class="dance-card" data-style="breakdance_freeze">
+                <div>
+                  <div class="dance-card-header">
+                    <div class="dance-avatar-icon">⚡</div>
+                    <div class="dance-selected-badge">✓</div>
+                  </div>
+                  <h4 class="dance-title">Breakdance Freeze</h4>
+                  <div class="dance-meta">💥 115 BPM • Power Moves</div>
+                  <p class="dance-desc">Dynamic 6-step footwork, floor sweeps, windmill rotations, and explosive freeze locks.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Actions -->
+          <div class="action-row" style="display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
+            <button id="page-2-back-btn" class="btn btn-secondary btn-lg" type="button">
+              ← Back to Upload
+            </button>
+            <button id="generate-dance-btn" class="btn btn-gradient btn-lg" style="flex: 1; min-width: 240px;" type="button">
+              ✨ Generate AI Dance Video
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         PAGE 3 – AI PROCESSING / LOADING
+         ==================================================================== -->
+    <section id="page-3" class="page-stage">
+      <div class="glass-panel">
+        <div class="processing-cockpit">
+          <!-- Animated Neural Orb -->
+          <div class="neural-visualizer-box">
+            <div class="neural-spinner"></div>
+            <div class="neural-spinner-inner"></div>
+            <div class="neural-center-icon">🧠</div>
+          </div>
+
+          <h2 class="processing-title">Generating Your AI Dance Video</h2>
+          <p class="processing-subtitle">Our deep neural motion model is synthesizing realistic body choreography and beat synchronization.</p>
+
+          <!-- Animated Progress Bar -->
+          <div class="progress-container">
+            <div id="progress-bar-fill" class="progress-bar-fill"></div>
+          </div>
+          <div class="progress-stats">
+            <span>SYNTHESIS PROGRESS</span>
+            <span id="progress-percent">0%</span>
+          </div>
+
+          <!-- Step-by-Step Status Checklist -->
+          <div class="status-timeline">
+            <div class="status-step-item active" data-step="0">
+              <span class="status-icon">1</span>
+              <span>Analysing your video & subject composition...</span>
+            </div>
+            <div class="status-step-item" data-step="1">
+              <span class="status-icon">2</span>
+              <span>Extracting 33-point skeletal pose & facial landmarks...</span>
+            </div>
+            <div class="status-step-item" data-step="2">
+              <span class="status-icon">3</span>
+              <span>Applying dance movements & motion diffusion...</span>
+            </div>
+            <div class="status-step-item" data-step="3">
+              <span class="status-icon">4</span>
+              <span>Synthesizing dynamic lighting, beat sync & video FX...</span>
+            </div>
+            <div class="status-step-item" data-step="4">
+              <span class="status-icon">5</span>
+              <span>Generating your final video render...</span>
+            </div>
+          </div>
+
+          <!-- Warning message & Skip Button -->
+          <div class="processing-alert-banner" style="margin-bottom: 20px;">
+            <span>⚡</span>
+            <span><strong>Please do not close or refresh this page</strong> while your video is being generated.</span>
+          </div>
+
+          <div>
+            <button id="skip-processing-btn" class="btn btn-secondary" type="button">
+              ⏩ Skip Waiting & View Video Immediately
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         PAGE 4 – GENERATED VIDEO
+         ==================================================================== -->
+    <section id="page-4" class="page-stage">
+      <div class="glass-panel">
+        <div class="generated-video-container">
+          <div class="hero-header" style="margin-bottom: 20px;">
+            <div class="badge-pill">🎉 AI Generation Complete</div>
+            <h2 class="hero-title" style="font-size: 2.1rem;">Your AI Dance Video is <span class="gradient-text">Ready!</span></h2>
+          </div>
+
+          <!-- Centered Video Showcase Viewport -->
+          <div id="video-showcase-frame" class="video-showcase-frame">
+            <canvas id="dance-canvas" class="dance-canvas"></canvas>
+
+            <!-- Video Player Controls Overlay -->
+            <div class="video-overlay-controls">
+              <div class="video-top-bar">
+                <span id="video-style-tag" class="video-style-tag">CYBER HIP-HOP • 128 BPM</span>
+                <span style="font-size: 0.75rem; color: #fff; background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 4px;">HD 1080p 60FPS</span>
+              </div>
+
+              <!-- Center Big Play Button (when paused) -->
+              <button id="video-center-play-btn" class="video-center-play" type="button" title="Play Video">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+              </button>
+
+              <!-- Bottom Controls Bar -->
+              <div class="video-bottom-bar">
+                <div id="scrubber-track" class="scrubber-track">
+                  <div id="scrubber-fill" class="scrubber-fill"></div>
+                </div>
+
+                <div class="controls-row">
+                  <div class="left-ctrls">
+                    <button id="btn-play-pause" class="ctrl-btn" type="button" title="Play/Pause">⏸</button>
+                    <span id="time-display" class="time-label">00:00 / 00:16</span>
+                  </div>
+
+                  <div class="right-ctrls">
+                    <button id="btn-mute" class="ctrl-btn" type="button" title="Mute/Unmute">🔊</button>
+                    <input id="volume-slider" type="range" min="0" max="1" step="0.05" value="0.8" style="width: 70px; accent-color: var(--accent-cyan);" />
+                    
+                    <select id="speed-select" style="background: rgba(0,0,0,0.5); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px; font-size: 0.78rem;">
+                      <option value="0.5">0.5x</option>
+                      <option value="1.0" selected>1.0x</option>
+                      <option value="1.5">1.5x</option>
+                      <option value="2.0">2.0x</option>
+                    </select>
+
+                    <button id="btn-fullscreen" class="ctrl-btn" type="button" title="Fullscreen">⛶</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Actions Grid -->
+          <div class="video-action-grid">
+            <button id="page-4-back-btn" class="btn btn-secondary btn-lg" type="button">
+              ← Change Dance
+            </button>
+
+            <button id="download-video-btn" class="btn btn-primary btn-lg" type="button">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              Download Video
+            </button>
+
+            <button id="share-video-btn" class="btn btn-gradient btn-lg" type="button">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+              Share & Mobile QR Code
+            </button>
+
+            <button id="create-another-btn" class="btn btn-secondary btn-lg" type="button">
+              🔄 Create Another
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         PAGE 5 – QR CODE & MOBILE SHARING
+         ==================================================================== -->
+    <section id="page-5" class="page-stage">
+      <div class="glass-panel">
+        <div class="hero-header" style="margin-bottom: 24px;">
+          <div class="badge-pill">📱 Mobile Transfer & Social</div>
+          <h2 class="hero-title" style="font-size: 2.1rem;">Scan to Watch on <span class="gradient-text">Your Phone</span></h2>
+          <p class="hero-subtitle">Scan the QR code below using your mobile camera or share the instant link with friends.</p>
+        </div>
+
+        <div class="share-cockpit">
+          <!-- Left / Center: Crisp QR Code Display -->
+          <div class="qr-display-box">
+            <div class="qr-scan-instruction">Scan with any phone camera:</div>
+            <div class="qr-canvas-holder">
+              <canvas id="qr-canvas"></canvas>
+            </div>
+            <p style="font-size: 0.78rem; color: #64748b;">Instant playback • No app install required</p>
+          </div>
+
+          <!-- Right: Details & Action Options -->
+          <div class="share-details-panel">
+            <!-- Small Preview / Thumbnail of Generated Video -->
+            <div class="video-mini-preview-card">
+              <img id="share-mini-thumb" class="mini-thumb" src="" alt="Video Preview" />
+              <div class="mini-info">
+                <h4 id="share-mini-title">Cyber Hip-Hop AI Video</h4>
+                <p id="share-mini-meta">Generated today • 128 BPM • 1080p</p>
+              </div>
+            </div>
+
+            <!-- Copy Link Bar -->
+            <div>
+              <label style="font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 6px;">Direct Link:</label>
+              <div class="copy-link-bar">
+                <input id="share-link-input" class="copy-link-input" type="text" readonly value="https://grooveai.studio/v/dance-demo" />
+                <button id="copy-link-btn" class="btn btn-primary" style="border-radius: 0;" type="button">
+                  📋 Copy Link
+                </button>
+              </div>
+            </div>
+
+            <!-- Social Quick Sharing -->
+            <div>
+              <label style="font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 8px;">Quick Share to Apps:</label>
+              <div class="social-share-row">
+                <button class="social-btn" data-platform="whatsapp" type="button">💬 WhatsApp</button>
+                <button class="social-btn" data-platform="twitter" type="button">𝕏 Twitter</button>
+                <button class="social-btn" data-platform="tiktok" type="button">🎵 TikTok</button>
+                <button class="social-btn" data-platform="instagram" type="button">📸 Instagram</button>
+              </div>
+            </div>
+
+            <!-- Action Buttons: Download QR & Back to Video -->
+            <div style="display: flex; gap: 12px; margin-top: 10px;">
+              <button id="download-qr-btn" class="btn btn-secondary" style="flex: 1;" type="button">
+                💾 Download QR Code
+              </button>
+              <button id="back-to-video-btn" class="btn btn-secondary" style="flex: 1;" type="button">
+                ⬅ Back to Video
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="js/qr-generator.js"></script>
+  <script src="js/dance-engine.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
