@@ -1,24 +1,40 @@
+import io
+import base64
 import qrcode
+from PIL import Image
 
-# Your Cloudinary video URL
-video_url = "https://res.cloudinary.com/fqcmh6bx/video/upload/v1787986431/rwhg6srdqaij8pjpplp2.mp4"
+def generate_qr_code(data_url, output_path=None):
+    """
+    Generates a QR Code for data_url.
+    - If output_path is provided, saves image file to disk.
+    - Returns (image_path, base64_uri)
+    """
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=10,
+        border=4
+    )
 
-# Create QR code
-qr = qrcode.QRCode(
-    version=1,
-    error_correction=qrcode.constants.ERROR_CORRECT_H,
-    box_size=10,
-    border=4
-)
+    qr.add_data(data_url)
+    qr.make(fit=True)
 
-qr.add_data(video_url)
-qr.make(fit=True)
+    qr_image = qr.make_image(fill_color="black", back_color="white")
 
-# Generate image
-qr_image = qr.make_image()
+    if output_path:
+        qr_image.save(output_path)
+        print(f"[QR Code] Saved QR code image to '{output_path}'")
 
-# Save QR code
-qr_image.save("video_qr.png")
+    # Generate base64 data URI for direct web image rendering
+    buffered = io.BytesIO()
+    qr_image.save(buffered, format="PNG")
+    base64_data = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    base64_uri = f"data:image/png;base64,{base64_data}"
 
-print("QR code generated successfully!")
-print("Saved as: video_qr.png")
+    return output_path, base64_uri
+
+
+if __name__ == "__main__":
+    test_url = "https://res.cloudinary.com/demo/video/upload/fl_attachment/sample.mp4"
+    path, b64 = generate_qr_code(test_url, "video_qr.png")
+    print("Test QR code generated successfully!")

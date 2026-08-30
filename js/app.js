@@ -242,7 +242,15 @@ document.addEventListener('DOMContentLoaded', () => {
       vid.src = objectUrl;
       vid.muted = true;
       vid.playsInline = true;
-      vid.onloadeddata = () => {
+      vid.onloadedmetadata = () => {
+        if (vid.duration > 8) {
+          showToast('⏱️ Notice: Video exceeds 8s limit. Automatically trimming to the first 8 seconds!', 6000);
+          mediaObj.trimmed = true;
+        }
+        mediaObj.element = vid;
+        setUploadedMedia(mediaObj);
+      };
+      vid.onerror = () => {
         mediaObj.element = vid;
         setUploadedMedia(mediaObj);
       };
@@ -455,6 +463,25 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.statusSteps.forEach(s => s.classList.remove('active', 'completed'));
     if (elements.statusSteps[0]) elements.statusSteps[0].classList.add('active');
 
+    // Dispatch API call to Flask backend service
+    fetch('/api/process-dance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dance_style: state.selectedDance,
+        source_media: state.uploadedMedia ? state.uploadedMedia.name : 'preset_guy',
+        user_media: state.cameraVideoUrl ? 'live_camera_clip' : 'uploaded_avatar'
+      })
+    }).then(res => res.json()).then(data => {
+      if (data && data.status === 'success') {
+        state.backendResponse = data;
+        state.generatedVideoId = data.video_id;
+        console.log('[Backend Integration] Generated video ID:', data.video_id, data.download_url);
+      }
+    }).catch(err => {
+      console.warn('[Backend Notice] Running in offline demo mode:', err);
+    });
+
     processingInterval = setInterval(() => {
       progress += 1;
       elements.progressBar.style.width = `${progress}%`;
@@ -611,7 +638,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // PAGE 5: QR CODE & MOBILE SHARING
   function onEnterPage5() {
     const style = danceEngine.styles[state.selectedDance];
-    const shareUrl = `${window.location.origin}${window.location.pathname}#view=${state.generatedVideoId}`;
+    let shareUrl = `${window.location.origin}/download/${state.generatedVideoId}`;
+
+    if (state.backendResponse && state.backendResponse.qr_target_url) {
+      shareUrl = state.backendResponse.qr_target_url;
+    }
 
     QRCodeGenerator.renderToCanvas(elements.qrCanvas, shareUrl, 220);
 

@@ -1,5 +1,9 @@
-moviepy
+flask
+flask-cors
+firebase-admin
 cloudinary
 psycopg2-binary
 python-dotenv
 qrcode[pil]
+moviepy
+Pillow

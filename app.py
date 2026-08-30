@@ -1,153 +1,160 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-from sklearn.tree import DecisionTreeClassifier, _tree
-import graphviz
-import re
+import os
+import uuid
+from flask import Flask, request, jsonify, send_from_directory, redirect
+from flask_cors import CORS
+from dotenv import load_dotenv
 
-st.set_page_config(page_title="Live AI Mind-Reader", layout="wide")
+from generate_video import generate_ai_dance_video, trim_video_to_8s
+from upload_video import upload_video, get_download_url
+from database import save_video, get_video
+from generate_qr import generate_qr_code
 
-# --- 1. Load Initial Data & Session State ---
-def load_data():
-    data = [
-        {"name": "Laksa", "is_food": 1, "is_plant_animal": 0, "is_place": 0, "is_legendary": 0},
-        {"name": "Merlion", "is_food": 0, "is_plant_animal": 0, "is_place": 1, "is_legendary": 1},
-        {"name": "Hainanese Chicken Rice", "is_food": 1, "is_plant_animal": 0, "is_place": 0, "is_legendary": 0},
-        {"name": "Marina Bay Sands", "is_food": 0, "is_plant_animal": 0, "is_place": 1, "is_legendary": 0},
-        {"name": "Smooth-coated Otter", "is_food": 0, "is_plant_animal": 1, "is_place": 0, "is_legendary": 0},
-        {"name": "Chilli Crab", "is_food": 1, "is_plant_animal": 1, "is_place": 0, "is_legendary": 0},
-        {"name": "Vanda Miss Joaquim", "is_food": 0, "is_plant_animal": 1, "is_place": 0, "is_legendary": 1},
-        {"name": "Sang Nila Utama", "is_food": 0, "is_plant_animal": 0, "is_place": 0, "is_legendary": 1}
-    ]
-    return pd.DataFrame(data)
+load_dotenv()
 
-if "df" not in st.session_state:
-    st.session_state.df = load_data()
-if "node_history" not in st.session_state:
-    st.session_state.node_history = [0]
-if "failed" not in st.session_state:
-    st.session_state.failed = False
-    
-# Dynamic map to translate column keys into human questions
-if "question_map" not in st.session_state:
-    st.session_state.question_map = {
-        "is_food": "Is your item something you can eat or drink?",
-        "is_plant_animal": "Is it related to a living plant or animal?",
-        "is_place": "Is it a physical location, building, or landmark?",
-        "is_legendary": "Is it symbolic, national, or rooted in folklore?"
+app = Flask(__name__, static_folder=".", static_url_path="")
+CORS(app)
+
+UPLOAD_FOLDER = os.path.join(os.getcwd(), "uploads")
+OUTPUT_FOLDER = os.path.join(os.getcwd(), "videos")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# -------------------------------------------------------------------
+# FRONTEND ROUTE
+# -------------------------------------------------------------------
+@app.route("/")
+def index():
+    """Serves the main 5-step SPA template (index.html)."""
+    return send_from_directory(".", "index.html")
+
+# -------------------------------------------------------------------
+# REST API ENDPOINTS
+# -------------------------------------------------------------------
+
+@app.route("/api/upload-video", methods=["POST"])
+def upload_source_video():
+    """
+    Endpoint for uploading source TikTok / dancing videos.
+    Checks duration, auto-trims to 8 seconds if exceeded, and returns notification details.
+    """
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"status": "error", "message": "Empty filename"}), 400
+
+    filename = f"upload_{uuid.uuid4().hex[:8]}_{file.filename}"
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(file_path)
+
+    # Trim to 8s maximum duration
+    trimmed_path, was_trimmed = trim_video_to_8s(file_path, max_duration=8.0)
+    final_filename = os.path.basename(trimmed_path)
+
+    response_data = {
+        "status": "success",
+        "filename": final_filename,
+        "file_url": f"/uploads/{final_filename}",
+        "was_trimmed": was_trimmed,
+        "message": "Video exceeds 8 seconds. Automatically trimmed to first 8 seconds!" if was_trimmed else "Video uploaded successfully!"
     }
+    return jsonify(response_data)
 
-df = st.session_state.df
-features = [c for c in df.columns if c != "name"]
-X = df[features]
-y = df["name"]
 
-# --- 2. Live Model Training ---
-clf = DecisionTreeClassifier(random_state=42)
-clf.fit(X, y)
-tree = clf.tree_
+@app.route("/api/process-dance", methods=["POST"])
+def process_dance():
+    """
+    Endpoint for processing dance video generation:
+    1. Triggers AI Body-Swapping pipeline (generate_ai_dance_video)
+    2. Uploads output video to Cloudinary (upload_video)
+    3. Saves video metadata to Firebase Firestore / DB (save_video)
+    4. Generates mobile QR code (generate_qr_code)
+    """
+    data = request.json or {}
+    dance_style = data.get("dance_style", "cyber_hiphop")
+    source_media = data.get("source_media", "")
+    user_media = data.get("user_media", "")
 
-current_node = st.session_state.node_history[-1]
+    video_id = f"dance_{uuid.uuid4().hex[:8]}"
+    output_path = os.path.join(OUTPUT_FOLDER, f"{video_id}.mp4")
 
-# --- 3. Helper Functions ---
-def is_leaf(node_id):
-    return tree.children_left[node_id] == _tree.TREE_LEAF
+    # 1. Generate Dance Video
+    print(f"[API Process] Generating dance video for ID: {video_id}, style: {dance_style}")
+    generated_file = generate_ai_dance_video(
+        source_dance_path=source_media,
+        user_person_path=user_media,
+        dance_style=dance_style,
+        output_path=output_path
+    )
 
-def get_node_prediction(node_id):
-    values = tree.value[node_id][0]
-    best_idx = np.argmax(values)
-    return clf.classes_[best_idx]
+    # 2. Upload to Cloudinary
+    video_url = upload_video(generated_file)
+    download_url = get_download_url(video_url)
 
-def make_graph(active_node):
-    dot = graphviz.Digraph(format="svg")
-    dot.attr("node", shape="box", style="rounded,filled", fontsize="10")
+    # 3. Save to Firebase Firestore / DB
+    filename = os.path.basename(generated_file)
+    db_id = save_video(filename, video_url, video_id=video_id)
+
+    # 4. Generate Download QR Code
+    # QR code points to the direct mobile download endpoint or Cloudinary download link
+    qr_target_url = request.host_url.rstrip('/') + f"/download/{video_id}"
+    qr_file_path = os.path.join(OUTPUT_FOLDER, f"{video_id}_qr.png")
+    _, qr_code_base64 = generate_qr_code(qr_target_url, output_path=qr_file_path)
+
+    return jsonify({
+        "status": "success",
+        "video_id": video_id,
+        "filename": filename,
+        "video_url": video_url,
+        "download_url": download_url,
+        "qr_target_url": qr_target_url,
+        "qr_code_base64": qr_code_base64
+    })
+
+
+@app.route("/api/video/<video_id>", methods=["GET"])
+def get_video_info(video_id):
+    """Retrieves video metadata from Firebase Firestore / DB."""
+    video = get_video(video_id)
+    if not video:
+        return jsonify({"status": "error", "message": "Video not found"}), 404
     
-    def add_nodes(node_id):
-        if is_leaf(node_id):
-            dot.node(str(node_id), get_node_prediction(node_id), fillcolor="#A8E6CF" if node_id == active_node else "#E0E0E0")
-            return
-        
-        feat_key = features[tree.feature[node_id]]
-        # Truncate question for the graph so nodes don't get too wide
-        full_question = st.session_state.question_map.get(feat_key, feat_key)
-        short_label = (full_question[:25] + '...?') if len(full_question) > 25 else full_question
-        
-        dot.node(str(node_id), short_label, fillcolor="#FFD3B6" if node_id == active_node else "#F5F5F5")
-        
-        left = tree.children_left[node_id]
-        right = tree.children_right[node_id]
-        if left != _tree.TREE_LEAF:
-            dot.edge(str(node_id), str(left), label="No")
-            add_nodes(left)
-        if right != _tree.TREE_LEAF:
-            dot.edge(str(node_id), str(right), label="Yes")
-            add_nodes(right)
+    video_url = video.get("video_url", "")
+    download_url = get_download_url(video_url)
+    return jsonify({
+        "status": "success",
+        "video": video,
+        "download_url": download_url
+    })
 
-    add_nodes(0)
-    return dot
 
-# --- 4. UI Layout & Game Logic ---
-st.title("Live Learning AI")
-st.caption("Play the game. If the AI is wrong, teach it something new!")
-col_game, col_viz = st.columns([1, 1])
+@app.route("/download/<video_id>", methods=["GET"])
+def direct_download(video_id):
+    """
+    Direct mobile download redirect endpoint.
+    When mobile users scan the QR code, this endpoint redirects directly to Cloudinary's MP4 attachment download link!
+    """
+    video = get_video(video_id)
+    if video and "video_url" in video:
+        download_url = get_download_url(video["video_url"])
+        return redirect(download_url)
+    return jsonify({"status": "error", "message": "Video unavailable for download"}), 404
 
-with col_game:
-    if not st.session_state.failed:
-        if is_leaf(current_node):
-            prediction = get_node_prediction(current_node)
-            st.success(f"**My guess is: {prediction}**")
-            
-            col1, col2 = st.columns(2)
-            if col1.button("You got it!", use_container_width=True):
-                st.session_state.node_history = [0]
-                st.rerun()
-            if col2.button("Wrong!", use_container_width=True):
-                st.session_state.failed = True
-                st.session_state.wrong_guess = prediction
-                st.rerun()
-        else:
-            feat_idx = tree.feature[current_node]
-            feat_key = features[feat_idx]
-            # Fetch the actual human-readable question
-            question_text = st.session_state.question_map.get(feat_key, f"Does it satisfy: {feat_key}?")
-            
-            st.markdown(f"### {question_text}")
-            col1, col2 = st.columns(2)
-            if col1.button("Yes", use_container_width=True):
-                st.session_state.node_history.append(tree.children_right[current_node])
-                st.rerun()
-            if col2.button("No", use_container_width=True):
-                st.session_state.node_history.append(tree.children_left[current_node])
-                st.rerun()
 
-    # --- 5. The Data Engineering (Learning) Step ---
-    if st.session_state.failed:
-        st.warning("I need to learn! Let's update my dataset.")
-        wrong_guess = st.session_state.wrong_guess
-        
-        new_item = st.text_input("What were you actually thinking of?")
-        new_question = st.text_input(f"Type a Yes/No question where the answer is YES for **{new_item}** and NO for **{wrong_guess}**:", placeholder="e.g., Is it famously spicy?")
-        
-        if st.button("Train AI"):
-            if new_item and new_question:
-                # 1. Generate a safe dataframe column key from the text
-                new_feature_key = re.sub(r'[^a-z0-9]', '_', new_question.lower())[:20] + f"_{len(features)}"
-                
-                # 2. Save the human-readable question to the map
-                st.session_state.question_map[new_feature_key] = new_question
-                
-                # 3. Add column and populate data
-                st.session_state.df[new_feature_key] = 0
-                wrong_guess_row = st.session_state.df[st.session_state.df["name"] == wrong_guess].iloc[0].copy()
-                wrong_guess_row["name"] = new_item
-                wrong_guess_row[new_feature_key] = 1 
-                
-                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([wrong_guess_row])], ignore_index=True)
-                
-                st.session_state.failed = False
-                st.session_state.node_history = [0]
-                st.rerun()
+@app.route("/uploads/<path:filename>")
+def serve_uploads(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
-with col_viz:
-    st.subheader("Live Model Flowchart")
-    st.graphviz_chart(make_graph(current_node), use_container_width=True)
+
+@app.route("/videos/<path:filename>")
+def serve_videos(filename):
+    return send_from_directory(OUTPUT_FOLDER, filename)
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    print(f"==================================================")
+    print(f" GrooveAI Server Running on http://localhost:{port}")
+    print(f"==================================================")
+    app.run(host="0.0.0.0", port=port, debug=True)
