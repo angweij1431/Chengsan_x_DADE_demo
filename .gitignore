@@ -8,3 +8,6 @@ temp/
 *.png
 !js/
 
+# Firebase & Secret JSON Credentials
+serviceAccountKey.json
+*.json
