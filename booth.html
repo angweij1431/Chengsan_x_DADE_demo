@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Booth</title>
+  <link rel="stylesheet" href="css/booth.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand" id="home-link">
+      <span class="brand-dot"></span>
+      <span>AI Booth</span>
+    </div>
+    <div class="provider-chip" id="provider-chip">connecting…</div>
+  </header>
+
+  <main class="stage">
+
+    <!-- ================= HOME ================= -->
+    <section id="view-home" class="view active">
+      <h1 class="headline">Pick a station</h1>
+      <p class="sub">Upload a photo and let the AI do the rest.</p>
+
+      <div class="station-grid">
+        <button class="station-card" data-station="dance">
+          <div class="station-emoji">🕺</div>
+          <h2>Make me dance</h2>
+          <p>Turn your photo into a dance video. Choose a style, or bring your own dance clip.</p>
+          <span class="station-go">Start →</span>
+        </button>
+
+        <button class="station-card" data-station="edit">
+          <div class="station-emoji">🎨</div>
+          <h2>Edit my photo</h2>
+          <p>Add a second photo and tell us what to change — outfits, styles, or put two photos together.</p>
+          <span class="station-go">Start →</span>
+        </button>
+
+        <button class="station-card" data-station="scene">
+          <div class="station-emoji">🏙️</div>
+          <h2>Put me somewhere</h2>
+          <p>Upload a place and a photo of yourself. We'll drop you into the scene and make it beautiful.</p>
+          <span class="station-go">Start →</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ================= STATION ================= -->
+    <section id="view-station" class="view">
+      <button class="back-btn" data-goto="home">← All stations</button>
+      <h1 class="headline" id="station-title">Station</h1>
+      <p class="sub" id="station-sub"></p>
+
+      <div class="slot-row">
+        <label class="slot" id="slot-primary">
+          <input type="file" accept="image/*" hidden />
+          <div class="slot-inner">
+            <div class="slot-icon">📷</div>
+            <div class="slot-label" id="slot-primary-label">Your photo</div>
+            <div class="slot-hint">Tap to upload</div>
+          </div>
+          <img class="slot-preview" alt="" />
+        </label>
+
+        <label class="slot" id="slot-secondary">
+          <input type="file" hidden />
+          <div class="slot-inner">
+            <div class="slot-icon">🖼️</div>
+            <div class="slot-label" id="slot-secondary-label">Second photo</div>
+            <div class="slot-hint" id="slot-secondary-hint">Tap to upload</div>
+          </div>
+          <img class="slot-preview" alt="" />
+          <video class="slot-preview" muted loop playsinline></video>
+        </label>
+      </div>
+
+      <div id="preset-block">
+        <div class="block-label" id="preset-label">Choose a style</div>
+        <div class="preset-row" id="preset-row"></div>
+      </div>
+
+      <div id="request-block">
+        <div class="block-label">Anything specific? <span class="optional">(optional)</span></div>
+        <input type="text" id="request-input" class="text-input"
+               placeholder="e.g. make it look like sunset, add a red jacket" />
+      </div>
+
+      <div class="quota-note" id="quota-note"></div>
+
+      <button class="generate-btn" id="generate-btn" disabled>Generate</button>
+      <div class="error-box" id="error-box" hidden></div>
+    </section>
+
+    <!-- ================= WORKING ================= -->
+    <section id="view-working" class="view">
+      <div class="spinner"></div>
+      <h1 class="headline" id="working-title">Working on it…</h1>
+      <p class="sub" id="working-sub">This usually takes 10–30 seconds. Please don't close this page.</p>
+    </section>
+
+    <!-- ================= RESULT ================= -->
+    <section id="view-result" class="view">
+      <h1 class="headline">Here you go!</h1>
+      <p class="sub" id="result-note"></p>
+
+      <div class="result-wrap">
+        <div class="result-media" id="result-media"></div>
+
+        <div class="result-side">
+          <div class="qr-card">
+            <div class="qr-title">Scan to save it</div>
+            <img id="qr-img" alt="QR code" />
+            <div class="qr-hint">Point your phone camera here</div>
+          </div>
+          <a class="download-btn" id="download-btn" download>⬇ Download</a>
+          <button class="secondary-btn" data-goto="station">↻ Try again</button>
+          <button class="secondary-btn" data-goto="home">🏠 All stations</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="js/booth.js"></script>
+</body>
+</html>

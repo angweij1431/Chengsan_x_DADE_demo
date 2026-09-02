@@ -11,3 +11,8 @@ temp/
 # Firebase & Secret JSON Credentials
 serviceAccountKey.json
 *.json
+
+# Booth prototype: visitor outputs, usage counters, driving clips
+outputs/
+booth_usage.db
+dance_templates/*.mp4

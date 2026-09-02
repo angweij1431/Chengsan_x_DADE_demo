@@ -1,9 +1,35 @@
-flask
-flask-cors
-firebase-admin
-cloudinary
-psycopg2-binary
-python-dotenv
-qrcode[pil]
-moviepy
-Pillow
+# Booth prototype (booth_app.py) — Station 1 dance, Station 2 edit, Station 3 scene.
+#
+# Versions below are pinned to what was actually installed and tested together
+# on Python 3.12. Install with:
+#
+#     python -m venv .venv
+#     .venv\Scripts\Activate.ps1        # Windows PowerShell
+#     pip install -r requirements.txt
+#
+# The old demos (app.py, main.py, app2.py) need heavier packages that are not
+# required to run the booth — see requirements-legacy.txt.
+
+# Web server
+flask==3.1.3
+flask-cors==6.0.5
+python-dotenv==1.2.3
+
+# Gemini image generation (Stations 2 and 3).
+# 2.x is required: the code uses client.models.generate_content with
+# response_modalities and types.ImageConfig, which 1.x does not have.
+google-genai==2.20.0
+
+# Image handling: EXIF rotation, downscaling, re-encoding uploads.
+pillow==12.3.0
+
+# Replicate REST calls for the dance station.
+requests==2.34.2
+
+# QR codes for the "scan to save it" step. The [pil] extra provides the
+# image writer.
+qrcode[pil]==8.2
+
+# Not a Python package: the `mock` dance provider shells out to ffmpeg to
+# render a demo video. Without it that station falls back to a still image.
+# Install separately from https://ffmpeg.org/download.html and add to PATH.

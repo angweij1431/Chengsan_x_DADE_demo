@@ -1,0 +1,27 @@
+# Dependencies for the ORIGINAL demos, kept separate from the booth prototype.
+#
+#     pip install -r requirements.txt -r requirements-legacy.txt
+#
+# You do not need any of this to run booth_app.py. It is split out because
+# psycopg2-binary and moviepy both build native code and are the most likely
+# things to fail on a fresh machine — and a failure here should not block
+# someone who only needs the booth working.
+#
+# These versions are NOT verified: none of these packages were installed or
+# exercised during the booth build.
+
+# app.py / main.py — Firestore + Cloudinary + Postgres storage pipeline
+firebase-admin
+cloudinary
+psycopg2-binary
+
+# main.py / generate_video.py import `moviepy.editor`, which was REMOVED in
+# MoviePy 2.0. Without this ceiling every video call silently lands in an
+# exception handler and writes a placeholder file. Either keep this pin or
+# migrate the imports to the 2.x API.
+moviepy<2
+
+# app2.py — the Streamlit void-deck inpainting demo (Hugging Face inpainting).
+# Needs API_TOKEN in .env.
+streamlit
+streamlit-drawable-canvas
