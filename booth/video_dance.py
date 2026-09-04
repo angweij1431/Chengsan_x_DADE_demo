@@ -3,41 +3,45 @@ Station 1: turn a visitor's photo into a dance video.
 
 The backend is pluggable and chosen with DANCE_PROVIDER:
 
-  gemini_omni - Gemini Omni 1.1 Flash (released 2026-08-27). THE DEFAULT.
-                First-party image-to-video, and accepts a ~3s reference clip via
-                <VIDEO_REF_0> to carry motion and character style. Handles both
-                the templates and visitor-supplied clips. ~$0.10/sec at 720p.
-                PAID: no Gemini video model has a free tier, so the project
-                behind GEMINI_API_KEY must have billing enabled.
-  mock        - no API key, no cost. Renders a real MP4 locally so the whole
-                booth flow is demoable offline. Set this as the fallback if a
-                paid provider dies mid-event.
-  replicate   - Wan 2.2 Animate. True frame-by-frame motion transfer from an
-                arbitrary-length driving video. Reproduces a specific
-                choreography more faithfully than Omni's style reference, and
-                is cheaper per clip (~$0.20-0.40 per 5s).
-  veo         - Google Veo. Prompt-driven image-to-video with no driving-clip
-                support at all, so templates only. Superseded by gemini_omni;
-                kept for accounts that only have Veo access.
+  minimax   - MiniMax Hailuo image-to-video. THE DEFAULT. Sends the visitor's
+              photo as the first frame plus a text prompt describing the dance.
+              PAID: MiniMax video has no free tier.
+  mock      - no API key, no cost. Renders a real MP4 locally so the whole booth
+              flow is demoable offline. Set this as the fallback if the paid
+              provider dies mid-event.
+  replicate - Wan 2.2 Animate. True frame-by-frame motion transfer from a
+              driving video. The ONLY provider that reproduces a specific
+              choreography exactly. Not MiniMax - a separate account and token.
 
-Choosing between gemini_omni and replicate: Omni's video reference is a style
-and motion *hint* capped around 3 seconds, so it captures the vibe of a dance.
-Wan Animate copies the actual choreography. If a visitor expects to see their
-exact routine reproduced, use replicate.
+HOW THE "BRING YOUR OWN DANCE CLIP" PATH WORKS ON MINIMAX
+
+MiniMax's image-to-video endpoint takes a first frame and a text prompt. It has
+no driving-video input, so a visitor's clip cannot be used as motion directly.
+Instead the clip is turned into words: ffmpeg pulls a few frames, the vision
+model describes the dance, and that description becomes the prompt.
+
+The result therefore captures the *kind* of dance in their clip, not their exact
+choreography. If a visitor expects their precise moves reproduced onto
+themselves, that needs DANCE_PROVIDER=replicate.
 
 Every provider returns the same dict so the Flask layer never branches on which
 one is active.
+
+Docs:
+  https://platform.minimax.io/docs/api-reference/video-generation-i2v
+  https://platform.minimax.io/docs/api-reference/video-generation-query
+  https://platform.minimax.io/docs/api-reference/file-management-retrieve
 """
 
-import base64
 import mimetypes
 import os
-import re
 import subprocess
 import time
 import uuid
 
 import requests
+
+from .minimax_client import MinimaxError, data_uri, get_json, post_json
 
 OUTPUT_DIR = os.path.join(os.getcwd(), "outputs")
 TEMPLATE_DIR = os.path.join(os.getcwd(), "dance_templates")
@@ -46,29 +50,31 @@ REPLICATE_MODEL = os.getenv(
     "REPLICATE_DANCE_MODEL", "wan-video/wan-2.2-animate-animation"
 )
 
-# Built-in choreography. `driving_video` is used by motion-transfer providers;
-# `prompt` is used by prompt-driven ones (Veo) and as the caption everywhere.
+# Built-in choreography. `prompt` drives prompt-based providers (MiniMax);
+# `driving_video` is used by motion-transfer providers (replicate).
 TEMPLATES = [
     {
-        "id": "cyber_hiphop",
-        "name": "Cyber Hip-Hop",
-        "emoji": "🕺",
-        "driving_video": "cyber_hiphop.mp4",
+        "id": "chill_groove",
+        "name": "Chill Groove",
+        "emoji": "\U0001F3A7",
+        "driving_video": "chill_groove.mp4",
         "prompt": (
-            "The person in the photo performs an energetic hip-hop dance: sharp "
-            "popping arm waves, a confident bounce on the beat, feet shifting "
-            "side to side. Neon-lit stage, cinematic lighting, camera locked off."
+            "The person sways gently side to side in a relaxed groove, weight "
+            "shifting slowly between feet. Hands stay loose and mostly still "
+            "close to the body, with only a subtle sway. The head tilts softly "
+            "on the beat. Calm, smooth energy, warm ambient lighting."
         ),
     },
     {
-        "id": "salsa_fiesta",
-        "name": "Salsa Fiesta",
-        "emoji": "💃",
-        "driving_video": "salsa_fiesta.mp4",
+        "id": "ballroom_waltz",
+        "name": "Ballroom Waltz",
+        "emoji": "\U0001F483",
+        "driving_video": "ballroom_waltz.mp4",
         "prompt": (
-            "The person in the photo dances salsa: rhythmic hip sway, "
-            "cross-body footwork, one fluid spin. Warm festive lighting, "
-            "camera locked off."
+            "The person performs a slow, elegant waltz step, gliding gently "
+            "from side to side with poised posture. The arms stay in a soft, "
+            "held frame close to the body, moving slowly with minimal reach. "
+            "Calm, graceful energy, warm ballroom lighting."
         ),
     },
     {
@@ -77,20 +83,21 @@ TEMPLATES = [
         "emoji": "✨",
         "driving_video": "kpop_idol.mp4",
         "prompt": (
-            "The person in the photo performs a crisp K-pop point choreography: "
-            "synchronised arm points, a heart pose, light bouncing steps. "
-            "Bright studio lighting, camera locked off."
+            "The person performs a crisp K-pop point choreography: synchronised "
+            "arm points, a heart pose, light bouncing steps. Bright studio lighting."
         ),
     },
     {
-        "id": "breakdance",
-        "name": "Breakdance",
-        "emoji": "⚡",
-        "driving_video": "breakdance.mp4",
+        "id": "runway_pose",
+        "name": "Runway Pose",
+        "emoji": "\U0001F9CD",
+        "driving_video": "runway_pose.mp4",
         "prompt": (
-            "The person in the photo breakdances: six-step footwork, a floor "
-            "sweep, ending in a freeze pose. Street setting, dramatic lighting, "
-            "camera locked off."
+            "The person stands in a confident runway stance, slowly shifting "
+            "weight onto one hip and holding the pose for a beat before a slow "
+            "turn. One hand rests lightly at the waist; the other stays relaxed "
+            "and still at the side. Slow, deliberate, poised energy, clean "
+            "studio lighting."
         ),
     },
 ]
@@ -101,7 +108,7 @@ class DanceError(Exception):
 
 
 def get_provider():
-    return os.getenv("DANCE_PROVIDER", "gemini_omni").strip().lower()
+    return os.getenv("DANCE_PROVIDER", "minimax").strip().lower()
 
 
 def get_template(template_id):
@@ -127,23 +134,25 @@ def generate_dance(person_image, template_id=None, driving_video_path=None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     template = get_template(template_id) if template_id else TEMPLATES[0]
-    if not driving_video_path:
+    provider = get_provider()
+
+    # Only motion-transfer providers use the template's bundled driving clip.
+    # MiniMax works from the template's text prompt, so handing it a template
+    # video would make it think the visitor brought their own.
+    if not driving_video_path and provider == "replicate":
         driving_video_path = template_video_path(template)
 
-    provider = get_provider()
     job_id = f"dance_{uuid.uuid4().hex[:8]}"
 
     if provider == "mock":
         return _generate_mock(person_image, template, job_id)
-    if provider == "gemini_omni":
-        return _generate_omni(person_image, template, driving_video_path, job_id)
+    if provider == "minimax":
+        return _generate_minimax(person_image, template, driving_video_path, job_id)
     if provider == "replicate":
         return _generate_replicate(person_image, template, driving_video_path, job_id)
-    if provider == "veo":
-        return _generate_veo(person_image, template, driving_video_path, job_id)
     raise DanceError(
         f"DANCE_PROVIDER='{provider}' is not recognised. "
-        "Use mock, gemini_omni, replicate, or veo."
+        "Use minimax, mock, or replicate."
     )
 
 
@@ -184,7 +193,7 @@ def _generate_mock(person_image, template, job_id):
                 "filename": os.path.basename(out_path),
                 "provider": "mock",
                 "template": template["name"],
-                "note": "Demo render (no AI). Set DANCE_PROVIDER=gemini_omni for real dancing.",
+                "note": "Demo render (no AI). Set DANCE_PROVIDER=minimax for real dancing.",
             }
         except Exception as e:
             print(f"[Dance/mock] ffmpeg failed ({e}); returning the still image.")
@@ -196,7 +205,10 @@ def _generate_mock(person_image, template, job_id):
         "filename": os.path.basename(still),
         "provider": "mock",
         "template": template["name"],
-        "note": "ffmpeg not installed, so this is a still image. Install ffmpeg or set DANCE_PROVIDER=gemini_omni.",
+        "note": (
+            "ffmpeg not installed, so this is a still image. Install ffmpeg or "
+            "set DANCE_PROVIDER=minimax."
+        ),
     }
 
 
@@ -209,294 +221,265 @@ def _have_ffmpeg():
 
 
 # ---------------------------------------------------------------------------
-# gemini_omni - Gemini Omni 1.1 Flash via the Interactions API
+# minimax - Hailuo image-to-video
 # ---------------------------------------------------------------------------
 
-OMNI_MODEL = os.getenv("OMNI_MODEL", "gemini-omni-1.1-flash")
+VIDEO_MODEL = os.getenv("MINIMAX_VIDEO_MODEL", "MiniMax-Hailuo-2.3")
 
-# Omni's own limits, from the model docs. Enforced here so a bad .env value
-# fails on startup-ish with a clear message instead of a 400 from the API.
-OMNI_RESOLUTIONS = {"360p", "720p", "1080p", "4k"}
-OMNI_MIN_DURATION = 3
-OMNI_MAX_DURATION = 10
+# From the i2v reference: resolution -> the durations that resolution allows,
+# per model. Enforced here so a bad .env value is caught before a request is
+# paid for, instead of coming back as an opaque parameter error.
+#
+# This has to be per-model, not one flat list. The combinations genuinely
+# differ: Hailuo-2.3 has no 512P at all, and the I2V-01 series is 720P/6s only.
+# A flat "is it one of these four?" check waves 512P through on the default
+# model, which is precisely the mistake this is here to catch.
+MODEL_CAPABILITIES = {
+    "MiniMax-Hailuo-2.3":      {"768P": {6, 10}, "1080P": {6}},
+    "MiniMax-Hailuo-2.3-Fast": {"768P": {6, 10}, "1080P": {6}},
+    "MiniMax-Hailuo-02":       {"512P": {6, 10}, "768P": {6, 10}, "1080P": {6}},
+    "I2V-01":                  {"720P": {6}},
+    "I2V-01-Director":         {"720P": {6}},
+    "I2V-01-live":             {"720P": {6}},
+}
 
-_omni_client = None
+# MiniMax caps the video prompt at 2000 characters.
+VIDEO_PROMPT_LIMIT = 2000
 
 
-def _omni_get_client():
-    """
-    Omni gets its own client, separate from the image one.
-
-    A video generation call blocks for minutes; the SDK's default HTTP timeout
-    is far shorter, so sharing the image client would abort mid-render after
-    the request had already been billed.
-    """
-    global _omni_client
-    if _omni_client is not None:
-        return _omni_client
-
-    from google import genai
-    from google.genai import types
-
-    from .gemini_image import ImageGenError, resolve_api_key
-
-    # resolve_api_key raises ImageGenError, which the Flask layer only handles
-    # for the image stations. Convert it so a missing key gives the visitor the
-    # real reason instead of a generic 500.
+def _video_settings():
+    raw_duration = os.getenv("MINIMAX_DURATION", "6").strip().lower().rstrip("s")
     try:
-        api_key = resolve_api_key()
-    except ImageGenError as e:
-        raise DanceError(str(e)) from e
-
-    seconds = int(os.getenv("OMNI_TIMEOUT", 600))
-    _omni_client = genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(timeout=seconds * 1000),  # milliseconds
-    )
-    return _omni_client
-
-
-def _omni_duration():
-    raw = os.getenv("OMNI_DURATION", "6").strip().lower().rstrip("s")
-    try:
-        value = int(raw)
+        duration = int(raw_duration)
     except ValueError:
-        raise DanceError(f"OMNI_DURATION must be a whole number of seconds, got '{raw}'.")
-    if not OMNI_MIN_DURATION <= value <= OMNI_MAX_DURATION:
         raise DanceError(
-            f"OMNI_DURATION must be between {OMNI_MIN_DURATION} and "
-            f"{OMNI_MAX_DURATION} seconds (Omni's limit). Got {value}."
+            f"MINIMAX_DURATION must be a whole number of seconds, got '{raw_duration}'."
         )
-    # The API wants a duration string with the unit: "6s", not "6".
-    return value, f"{value}s"
 
+    resolution = os.getenv("MINIMAX_RESOLUTION", "768P").strip().upper()
 
-def _omni_resolution():
-    value = os.getenv("OMNI_RESOLUTION", "720p").strip().lower()
-    if value not in OMNI_RESOLUTIONS:
+    allowed = MODEL_CAPABILITIES.get(VIDEO_MODEL)
+    if allowed is None:
+        # An unrecognised model is assumed to be newer than this table rather
+        # than wrong: MINIMAX_VIDEO_MODEL exists so a new model can be dropped
+        # in without a code change. Let MiniMax judge the combination.
+        print(f"[Dance/minimax] '{VIDEO_MODEL}' is not in the known-model table, "
+              "so duration/resolution are not checked locally.")
+        return duration, resolution
+
+    if resolution not in allowed:
         raise DanceError(
-            f"OMNI_RESOLUTION='{value}' is not valid. "
-            f"Use one of: {', '.join(sorted(OMNI_RESOLUTIONS))}."
+            f"{VIDEO_MODEL} does not support MINIMAX_RESOLUTION={resolution}. "
+            f"It supports: {', '.join(sorted(allowed))}."
         )
-    return value
 
-
-def _normalize_file_uri(uri):
-    """Files API URIs come back with query params; the Interactions API wants them bare."""
-    match = re.search(r"files/([a-zA-Z0-9]+)", uri or "")
-    if match:
-        return f"https://generativelanguage.googleapis.com/files/{match.group(1)}"
-    return uri
-
-
-def _upload_for_omni(client, path, timeout=180):
-    """
-    Push a local file through the Files API and wait for it to go ACTIVE.
-
-    Omni takes media by File API URI only - inline bytes are not accepted in an
-    interactions input part, so every input goes through here first.
-
-    The upload gets its own, much shorter HTTP timeout. The client's OMNI_TIMEOUT
-    is sized for a video render; letting an upload inherit it means a stalled
-    connection holds a booth visitor at the counter for ten minutes.
-    """
-    from google.genai import types
-
-    upload_seconds = int(os.getenv("OMNI_UPLOAD_TIMEOUT", 120))
-    try:
-        uploaded = client.files.upload(
-            file=path,
-            config=types.UploadFileConfig(
-                http_options=types.HttpOptions(timeout=upload_seconds * 1000)
-            ),
+    # Failing loudly beats silently charging for something other than what the
+    # .env asked for. 1080P is 6s-only on every current model.
+    if duration not in allowed[resolution]:
+        options = " or ".join(f"{d}" for d in sorted(allowed[resolution]))
+        raise DanceError(
+            f"{VIDEO_MODEL} at {resolution} only supports MINIMAX_DURATION={options}, "
+            f"not {duration}."
         )
-    except Exception as e:
-        raise DanceError(f"Upload to the Gemini Files API failed: {str(e)[:200]}") from e
 
-    deadline = time.time() + timeout
-    while getattr(uploaded.state, "name", str(uploaded.state)) == "PROCESSING":
-        if time.time() > deadline:
-            raise DanceError("Timed out waiting for the upload to process.")
-        time.sleep(2)
-        uploaded = client.files.get(name=uploaded.name)
-
-    if getattr(uploaded.state, "name", str(uploaded.state)) == "FAILED":
-        raise DanceError("Gemini could not process that file. Try a shorter clip.")
-
-    return _normalize_file_uri(uploaded.uri), uploaded.mime_type
+    return duration, resolution
 
 
-def _prep_reference_clip(src_path, job_id):
+def _describe_dance(driving_video_path, job_id):
     """
-    Trim and shrink a visitor's clip before upload.
+    Turn a visitor's clip into a text description of the dance.
 
-    Omni's guidance is that a reference video should be about 3 seconds; longer
-    ones work but upload slowly, which is dead time at a booth queue. Best
-    effort - if ffmpeg is missing we upload the original.
+    MiniMax i2v has no driving-video input, so this is how their clip is used at
+    all. ffmpeg tiles a few frames into one image and the vision model reads it.
     """
-    seconds = int(os.getenv("OMNI_REFERENCE_SECONDS", 3))
+    from .minimax_image import describe_image
+
     if not _have_ffmpeg():
-        return src_path
+        raise DanceError(
+            "Using your own dance clip needs ffmpeg installed on the booth "
+            "laptop, so the video can be read. Install ffmpeg and restart, pick "
+            "a built-in template instead, or switch to DANCE_PROVIDER=replicate."
+        )
 
-    trimmed = os.path.join(OUTPUT_DIR, f"{job_id}_ref.mp4")
+    montage = os.path.join(OUTPUT_DIR, f"{job_id}_frames.jpg")
     cmd = [
-        "ffmpeg", "-y", "-i", src_path, "-t", str(seconds),
-        "-vf", "scale='min(720,iw)':-2", "-r", "24",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", trimmed,
+        "ffmpeg", "-y", "-t", "6", "-i", driving_video_path,
+        "-frames:v", "1", "-vf", "fps=1,scale=360:-2,tile=3x2", montage,
     ]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=180)
-        return trimmed
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
     except Exception as e:
-        print(f"[Dance/omni] Could not pre-trim the clip ({e}); uploading it as-is.")
-        return src_path
-
-
-def _generate_omni(person_image, template, driving_video_path, job_id):
-    client = _omni_get_client()
-    duration, duration_str = _omni_duration()
-    resolution = _omni_resolution()
-
-    image_bytes, mime_type = person_image
-    ext = mimetypes.guess_extension(mime_type) or ".jpg"
-    frame_path = os.path.join(OUTPUT_DIR, f"{job_id}_frame{ext}")
-    reference_path = None
+        raise DanceError(f"Could not read that video file: {str(e)[:150]}") from e
 
     try:
-        with open(frame_path, "wb") as f:
-            f.write(image_bytes)
-
-        # The visitor's photo is the opening frame, so they recognisably start
-        # the shot rather than appearing as a lookalike the model invented.
-        frame_uri, frame_mime = _upload_for_omni(client, frame_path)
-        parts = [{"type": "image", "uri": frame_uri, "mime_type": frame_mime}]
-
-        if driving_video_path:
-            # Visitor's own clip becomes a motion/character reference. Omni treats
-            # this as style guidance, not frame-exact choreography - see module docstring.
-            reference_path = _prep_reference_clip(driving_video_path, job_id)
-            ref_uri, ref_mime = _upload_for_omni(client, reference_path)
-            parts.append({"type": "video", "uri": ref_uri, "mime_type": ref_mime})
-            prompt = (
-                "<FIRST_FRAME> The person in the first frame dances like the dancer "
-                "in <VIDEO_REF_0>, matching their rhythm, footwork and arm movements. "
-                "Keep the person's face and clothing exactly the same. "
-                "A single continuous shot, static camera, no scene cuts. "
-                "Include upbeat background music. No dialogue."
-            )
-        else:
-            prompt = (
-                f"<FIRST_FRAME> {template['prompt']} "
-                "Keep the person's face and clothing exactly the same. "
-                "A single continuous shot, static camera, no scene cuts. "
-                "Include upbeat background music. No dialogue."
-            )
-
-        parts.append({"type": "text", "text": prompt})
-
-        print(f"[Dance/omni] Submitting to {OMNI_MODEL} "
-              f"({duration}s @ {resolution}, billed per second)...")
+        with open(montage, "rb") as f:
+            frames = (f.read(), "image/jpeg")
         try:
-            interaction = client.interactions.create(
-                model=OMNI_MODEL,
-                input=parts,
-                response_format={
-                    "type": "video",
-                    "delivery": "uri",
-                    "aspect_ratio": os.getenv("OMNI_ASPECT_RATIO", "9:16"),
-                    "duration": duration_str,
-                    "resolution": resolution,
-                },
+            description = describe_image(
+                frames,
+                "These are frames from a dance video, in order. In under 70 "
+                "words, describe the dance movements: the style, the footwork, "
+                "what the arms and hips do, and the energy level. Describe only "
+                "the movement, not the people or the background. Reply with the "
+                "description only.",
             )
-        except Exception as e:
-            raise DanceError(_omni_error(e, bool(driving_video_path))) from e
-
-        output = getattr(interaction, "output_video", None)
-        if not output or not getattr(output, "uri", None):
-            raise DanceError(_omni_error(None, bool(driving_video_path)))
-
-        out_path = os.path.join(OUTPUT_DIR, f"{job_id}.mp4")
-        try:
-            with open(out_path, "wb") as f:
-                f.write(client.files.download(file=output.uri))
-        except Exception as e:
-            raise DanceError(f"Omni generated the video but the download failed: {str(e)[:200]}") from e
+        except MinimaxError as e:
+            raise DanceError(f"Could not interpret the dance in that clip: {e}") from e
     finally:
-        # Never leave a visitor's face or clip sitting in outputs/, which is served.
-        for path in (frame_path, reference_path):
-            if path and path != driving_video_path and os.path.exists(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+        if os.path.exists(montage):
+            try:
+                os.remove(montage)
+            except OSError:
+                pass
 
-    return {
-        "video_path": out_path,
-        "filename": os.path.basename(out_path),
-        "provider": "gemini_omni",
-        "template": template["name"],
-        "note": "",
+    return description
+
+
+def _generate_minimax(person_image, template, driving_video_path, job_id):
+    duration, resolution = _video_settings()
+
+    if driving_video_path:
+        movement = _describe_dance(driving_video_path, job_id)
+        prompt = (
+            f"The person in the image dances. {movement} "
+            "One continuous shot. [Static shot]"
+        )
+        note = (
+            "Your clip was used as a style reference, so the moves match its "
+            "energy rather than copying it exactly."
+        )
+    else:
+        prompt = f"{template['prompt']} One continuous shot. [Static shot]"
+        note = ""
+
+    payload = {
+        "model": VIDEO_MODEL,
+        "prompt": prompt[:VIDEO_PROMPT_LIMIT],
+        "first_frame_image": data_uri(person_image),
+        "duration": duration,
+        "resolution": resolution,
+        "prompt_optimizer": True,
     }
 
-
-def omni_preflight():
-    """
-    Cheap readiness check for /api/health - validates config and reaches the API
-    without submitting a (billed) generation.
-    """
-    client = _omni_get_client()
-    duration, _ = _omni_duration()
-    resolution = _omni_resolution()
+    print(f"[Dance/minimax] Submitting to {VIDEO_MODEL} "
+          f"({duration}s @ {resolution}, billed per clip)...")
     try:
-        list(client.models.list())
-    except Exception as e:
-        raise DanceError(f"Could not reach the Gemini API: {str(e)[:200]}") from e
-    return {"model": OMNI_MODEL, "duration": duration, "resolution": resolution}
+        created = post_json(
+            "/v1/video_generation", payload, timeout=120,
+            context="MiniMax video generation",
+        )
+    except MinimaxError as e:
+        raise DanceError(str(e)) from e
+
+    task_id = created.get("task_id")
+    if not task_id:
+        raise DanceError("MiniMax accepted the request but returned no task ID.")
+
+    file_id, direct_url = _poll_minimax(task_id)
+    if not direct_url:
+        direct_url = _minimax_download_url(file_id)
+
+    result = _download_video(direct_url, job_id, "minimax", template)
+    result["note"] = note
+    return result
 
 
-def _omni_error(e, used_reference):
-    text = str(e) if e else "Gemini Omni returned no video."
-    lowered = text.lower()
-    if "quota" in lowered or "resource_exhausted" in lowered or "429" in text:
-        return (
-            "Gemini Omni quota reached. Omni has no free tier — check that "
-            "billing is enabled on the project behind GEMINI_API_KEY."
+def _poll_minimax(task_id, timeout=None):
+    """
+    Poll until the task finishes. Returns (file_id, direct_url).
+
+    Newer MiniMax models hand back a ready-to-use URL in the status response;
+    older ones return a file_id that has to be exchanged separately. Both shapes
+    are handled so this doesn't break when an account is on either.
+    """
+    timeout = timeout or int(os.getenv("MINIMAX_TIMEOUT", 600))
+    deadline = time.time() + timeout
+    delay = 5
+
+    while True:
+        try:
+            status_body = get_json(
+                "/v1/query/video_generation", {"task_id": task_id}, timeout=60,
+                context="MiniMax status check",
+            )
+        except MinimaxError as e:
+            raise DanceError(str(e)) from e
+
+        status = (status_body.get("status") or "").lower()
+
+        if status == "success":
+            file_id = status_body.get("file_id")
+            content = status_body.get("content")
+            direct_url = content.get("url") if isinstance(content, dict) else None
+            if not file_id and not direct_url:
+                raise DanceError(
+                    "MiniMax reported success but returned no video reference."
+                )
+            return file_id, direct_url
+
+        if status == "fail":
+            reason = (status_body.get("base_resp") or {}).get("status_msg") or "no detail"
+            raise DanceError(f"MiniMax could not generate this video ({reason}).")
+
+        if status not in ("preparing", "queueing", "processing", ""):
+            raise DanceError(f"MiniMax returned an unexpected status '{status}'.")
+
+        if time.time() > deadline:
+            raise DanceError(
+                f"MiniMax is still working after {timeout}s. The generation may "
+                "still finish - check the MiniMax console before retrying, so "
+                "you don't pay twice."
+            )
+
+        time.sleep(delay)
+        delay = min(delay + 2, 15)  # back off; renders take 1-5 minutes
+
+
+def _minimax_download_url(file_id):
+    try:
+        body = get_json(
+            "/v1/files/retrieve", {"file_id": file_id}, timeout=60,
+            context="MiniMax file retrieve",
         )
-    if "permission" in lowered or "403" in text or "not found" in lowered:
-        return (
-            "This API key can't reach Gemini Omni. It needs a billing-enabled "
-            "project; the free tier does not include video generation."
-        )
-    if used_reference:
-        # Empty output with a reference clip is the documented symptom.
-        return (
-            f"{text} Note: uploading reference videos is not available in the "
-            "EEA, Switzerland, the UK, or some US states. If you are in one of "
-            "those regions, use a built-in template or DANCE_PROVIDER=replicate."
-        )
-    return f"Gemini Omni generation failed: {text[:300]}"
+    except MinimaxError as e:
+        raise DanceError(str(e)) from e
+
+    url = (body.get("file") or {}).get("download_url")
+    if not url:
+        raise DanceError("MiniMax returned no download URL for the finished video.")
+    return url
+
+
+def minimax_preflight(check_key=True):
+    """
+    Cheap readiness check for /api/health - validates the .env video settings
+    without submitting a (billed) generation.
+
+    check_key=False skips the credential probe, for callers that have already
+    validated the same MINIMAX_API_KEY. The probe costs a fraction of a cent,
+    but /api/health can be polled, so it is worth not paying for it twice.
+    """
+    from .minimax_client import ping
+
+    duration, resolution = _video_settings()
+    if check_key:
+        try:
+            ping()
+        except MinimaxError as e:
+            raise DanceError(str(e)) from e
+    return {"model": VIDEO_MODEL, "duration": duration, "resolution": resolution}
 
 
 # ---------------------------------------------------------------------------
 # replicate - Wan 2.2 Animate (motion transfer)
 # ---------------------------------------------------------------------------
 
-def _data_uri(path_or_bytes, mime_type=None):
-    if isinstance(path_or_bytes, tuple):
-        raw, mime_type = path_or_bytes
-    else:
-        with open(path_or_bytes, "rb") as f:
-            raw = f.read()
-        mime_type = mime_type or mimetypes.guess_type(path_or_bytes)[0] or "application/octet-stream"
-    return f"data:{mime_type};base64,{base64.b64encode(raw).decode()}"
-
-
 def _generate_replicate(person_image, template, driving_video_path, job_id):
     token = os.getenv("REPLICATE_API_TOKEN")
     if not token:
         raise DanceError(
             "REPLICATE_API_TOKEN is not set. Get one at https://replicate.com/account "
-            "or switch back to DANCE_PROVIDER=mock."
+            "or switch back to DANCE_PROVIDER=minimax."
         )
     if not driving_video_path or not os.path.exists(driving_video_path):
         raise DanceError(
@@ -507,8 +490,8 @@ def _generate_replicate(person_image, template, driving_video_path, job_id):
 
     payload = {
         "input": {
-            "image": _data_uri(person_image),
-            "video": _data_uri(driving_video_path),
+            "image": data_uri(person_image),
+            "video": data_uri(driving_video_path),
         }
     }
     headers = {
@@ -556,78 +539,26 @@ def _poll_replicate(prediction, headers, timeout=600):
     return output
 
 
+# ---------------------------------------------------------------------------
+# shared
+# ---------------------------------------------------------------------------
+
 def _download_video(url, job_id, provider, template):
     out_path = os.path.join(OUTPUT_DIR, f"{job_id}.mp4")
-    with requests.get(url, stream=True, timeout=300) as r:
-        r.raise_for_status()
-        with open(out_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1 << 16):
-                f.write(chunk)
+    try:
+        with requests.get(url, stream=True, timeout=300) as r:
+            r.raise_for_status()
+            with open(out_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 16):
+                    f.write(chunk)
+    except requests.RequestException as e:
+        raise DanceError(
+            f"The video was generated but could not be downloaded: {str(e)[:150]}"
+        ) from e
     return {
         "video_path": out_path,
         "filename": os.path.basename(out_path),
         "provider": provider,
-        "template": template["name"],
-        "note": "",
-    }
-
-
-# ---------------------------------------------------------------------------
-# veo - Gemini API (templates only; cannot follow a driving clip)
-# ---------------------------------------------------------------------------
-
-def _generate_veo(person_image, template, driving_video_path, job_id):
-    from google.genai import types
-
-    from .gemini_image import ImageGenError, get_client
-
-    if driving_video_path:
-        raise DanceError(
-            "Veo cannot copy a specific dance video. Use DANCE_PROVIDER=gemini_omni "
-            "or replicate for visitor-supplied clips, or pick a template instead."
-        )
-
-    model = os.getenv("VEO_MODEL", "veo-3.1-fast-generate-preview")
-    image_bytes, mime_type = person_image
-    try:
-        client = get_client()
-    except ImageGenError as e:
-        raise DanceError(str(e)) from e
-
-    print(f"[Dance/veo] Submitting to {model} (billed per second, no free tier)...")
-    try:
-        operation = client.models.generate_videos(
-            model=model,
-            prompt=template["prompt"],
-            image=types.Image(image_bytes=image_bytes, mime_type=mime_type),
-            config=types.GenerateVideosConfig(
-                aspect_ratio="9:16",
-                number_of_videos=1,
-                person_generation="allow_adult",
-            ),
-        )
-        deadline = time.time() + 600
-        while not operation.done:
-            if time.time() > deadline:
-                raise DanceError("Veo timed out after 10 minutes.")
-            time.sleep(5)
-            operation = client.operations.get(operation)
-    except DanceError:
-        raise
-    except Exception as e:
-        raise DanceError(f"Veo generation failed: {str(e)[:300]}") from e
-
-    videos = getattr(operation.response, "generated_videos", None) or []
-    if not videos:
-        raise DanceError("Veo returned no video.")
-
-    out_path = os.path.join(OUTPUT_DIR, f"{job_id}.mp4")
-    client.files.download(file=videos[0].video)
-    videos[0].video.save(out_path)
-    return {
-        "video_path": out_path,
-        "filename": os.path.basename(out_path),
-        "provider": "veo",
         "template": template["name"],
         "note": "",
     }

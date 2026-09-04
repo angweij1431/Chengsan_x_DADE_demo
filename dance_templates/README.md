@@ -5,12 +5,12 @@ a real clip of someone dancing, whose motion gets copied onto the visitor's
 photo. Drop those clips here, named to match `TEMPLATES` in
 `booth/video_dance.py`:
 
-| File                 | Template        |
-| -------------------- | --------------- |
-| `cyber_hiphop.mp4`   | Cyber Hip-Hop   |
-| `salsa_fiesta.mp4`   | Salsa Fiesta    |
-| `kpop_idol.mp4`      | K-Pop Idol      |
-| `breakdance.mp4`     | Breakdance      |
+| File                  | Template        |
+| --------------------- | --------------- |
+| `chill_groove.mp4`    | Chill Groove    |
+| `ballroom_waltz.mp4`  | Ballroom Waltz  |
+| `kpop_idol.mp4`       | K-Pop Idol      |
+| `runway_pose.mp4`     | Runway Pose     |
 
 ## What makes a good driving clip
 
@@ -31,5 +31,7 @@ use music videos, TikToks, or anything scraped from social media. Use one of:
 - properly licensed stock, or
 - clips under a licence that permits derivative works.
 
-`DANCE_PROVIDER=mock` and `DANCE_PROVIDER=veo` do not read this folder — mock
-renders locally, and Veo is prompt-driven and cannot follow a driving clip.
+`DANCE_PROVIDER=mock` and `DANCE_PROVIDER=minimax` do not read this folder —
+mock renders locally, and MiniMax is prompt-driven: its image-to-video endpoint
+has no driving-video input, so it works from each template's `prompt` field in
+`booth/video_dance.py` instead. Only `replicate` uses these clips.

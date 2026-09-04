@@ -209,6 +209,43 @@ body {
 .slot.filled .slot-icon { display: none; }
 .slot.filled .slot-hint { color: var(--green); }
 
+.phone-pair-btn {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.94rem;
+  padding: 13px;
+  margin: -10px 0 22px;
+  border-radius: 12px;
+  border: 1px dashed rgba(0, 240, 255, 0.45);
+  background: rgba(0, 240, 255, 0.06);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.phone-pair-btn:hover { background: rgba(0, 240, 255, 0.12); border-color: var(--cyan); }
+
+.phone-pair-panel {
+  background: #fff;
+  color: #0f172a;
+  border-radius: var(--radius);
+  padding: 22px;
+  text-align: center;
+  margin: -10px 0 22px;
+}
+.phone-pair-qr { width: 100%; max-width: 200px; display: block; margin: 0 auto 14px; }
+.phone-pair-status { font-size: 0.9rem; color: #334155; margin-bottom: 14px; min-height: 20px; }
+.phone-pair-panel .secondary-btn {
+  display: inline-block;
+  width: auto;
+  padding: 10px 22px;
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.2);
+  background: rgba(15, 23, 42, 0.06);
+}
+.phone-pair-panel .secondary-btn:hover { background: rgba(15, 23, 42, 0.12); }
+
 .block-label {
   font-size: 0.86rem;
   text-transform: uppercase;

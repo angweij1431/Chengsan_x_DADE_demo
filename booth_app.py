@@ -8,15 +8,18 @@ Three stations:
 
 Run:  python booth_app.py     then open http://localhost:5000
 
-All three stations run on one GEMINI_API_KEY:
-  - Stations 2 and 3 use a Gemini image model, which has a free tier.
-  - Station 1 uses Gemini Omni 1.1 Flash, which does NOT. Billing must be
-    enabled on the key's project, or set DANCE_PROVIDER=mock to run offline.
+All three stations run on one MINIMAX_API_KEY:
+  - Stations 2 and 3 use MiniMax image-01 plus its vision model.
+  - Station 1 uses MiniMax Hailuo image-to-video.
+
+MiniMax has no free tier, so every station costs money. Set DANCE_PROVIDER=mock
+to run Station 1 offline for free while rehearsing.
 """
 
 import io
 import os
 import socket
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -27,9 +30,12 @@ from flask_cors import CORS
 from PIL import Image
 
 from booth import limits, prompts
-from booth.gemini_image import ImageGenError, compose_image, resolve_model
+from booth.minimax_image import (
+    ImageGenError, compose_image, describe_image, resolve_model
+)
+from booth.minimax_image import preflight as image_preflight
 from booth.video_dance import (
-    TEMPLATES, DanceError, generate_dance, get_provider, omni_preflight
+    TEMPLATES, DanceError, generate_dance, get_provider, minimax_preflight
 )
 from generate_qr import generate_qr_code
 
@@ -172,26 +178,35 @@ def config():
 @app.route("/api/health")
 def health():
     provider = get_provider()
-    report = {"dance_provider": provider, "gemini": "unknown", "dance": "unknown"}
+    report = {"dance_provider": provider, "minimax": "unknown", "dance": "unknown"}
 
+    # One credential probe covers the whole booth: all three stations run on the
+    # same MINIMAX_API_KEY. Checked even when Station 1 is on `mock`, so the
+    # image stations can never show a green light on a dead key.
     try:
-        report["gemini_image_model"] = resolve_model()
-        report["gemini"] = "ok"
+        report["minimax_models"] = image_preflight()
+        report["minimax"] = "ok"
     except Exception as e:
-        report["gemini"] = f"error: {e}"
+        report["minimax"] = f"error: {e}"
 
-    # Station 1 is checked separately: it is the paid path, and a booth can run
-    # usefully with images working and video down (or the other way round).
-    if provider == "gemini_omni":
+    # Station 1 is reported separately: it is the expensive path, and the booth
+    # can run usefully with images working and video down, or the reverse.
+    if provider == "minimax":
         try:
-            report["omni"] = omni_preflight()
-            report["dance"] = "ok"
+            report["video"] = minimax_preflight(check_key=False)
+            # The config is valid, but Station 1 uses the same key that was just
+            # probed. Saying "ok" here on a rejected key is exactly the kind of
+            # false green light that gets trusted at the counter.
+            report["dance"] = (
+                "ok" if report["minimax"] == "ok"
+                else "error: config is valid but the MiniMax key was rejected"
+            )
         except Exception as e:
             report["dance"] = f"error: {e}"
     else:
-        report["dance"] = f"ok ({provider}, not preflighted)"
+        report["dance"] = f"ok ({provider}, no API needed)"
 
-    report["ok"] = report["gemini"] == "ok" and not report["dance"].startswith("error")
+    report["ok"] = report["minimax"] == "ok" and not report["dance"].startswith("error")
     return jsonify(report), (200 if report["ok"] else 503)
 
 
@@ -257,10 +272,85 @@ def api_dance():
 
 
 # ---------------------------------------------------------------------------
+# phone pairing - "scan to take the photo on your phone" for station 1
+#
+# The kiosk has no camera, so a visitor scans a QR that opens a tiny page on
+# their own phone, takes a photo there, and it's handed back to the kiosk
+# browser. Pairing state is a plain in-memory dict: this is a single-process
+# kiosk app, and a photo is only ever needed for the few minutes between
+# scanning and generating, so nothing here needs to survive a restart.
+# ---------------------------------------------------------------------------
+
+PAIRINGS = {}
+PAIRING_TTL = 600  # 10 minutes - long enough to fumble with a phone camera
+
+
+def _cleanup_pairings():
+    cutoff = time.time() - PAIRING_TTL
+    for token in [t for t, p in PAIRINGS.items() if p["created"] < cutoff]:
+        PAIRINGS.pop(token, None)
+
+
+@app.route("/api/pair/new", methods=["POST"])
+def pair_new():
+    _cleanup_pairings()
+    token = uuid.uuid4().hex[:12]
+    PAIRINGS[token] = {"status": "pending", "photo": None, "mime": None, "created": time.time()}
+
+    mobile_url = f"{lan_host()}/phone/{token}"
+    _, qr_base64 = generate_qr_code(mobile_url)
+    return jsonify({"token": token, "mobile_url": mobile_url, "qr_code_base64": qr_base64})
+
+
+@app.route("/phone/<token>")
+def phone_capture_page(token):
+    if token not in PAIRINGS:
+        return (
+            "This link has expired. Go back to the booth and scan a fresh QR code.",
+            404,
+        )
+    return send_from_directory(".", "phone_capture.html")
+
+
+@app.route("/api/pair/<token>/status")
+def pair_status(token):
+    pairing = PAIRINGS.get(token)
+    if not pairing:
+        return jsonify({"status": "expired"}), 404
+    return jsonify({"status": pairing["status"]})
+
+
+@app.route("/api/pair/<token>/photo", methods=["POST"])
+def pair_upload(token):
+    pairing = PAIRINGS.get(token)
+    if not pairing:
+        return fail("This pairing has expired. Go back and scan a fresh QR code.", 404)
+
+    try:
+        photo_bytes, mime_type = read_image(request.files.get("photo"), "photo")
+    except ValueError as e:
+        return fail(str(e))
+
+    pairing["photo"] = photo_bytes
+    pairing["mime"] = mime_type
+    pairing["status"] = "ready"
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/pair/<token>/photo", methods=["GET"])
+def pair_download(token):
+    pairing = PAIRINGS.get(token)
+    if not pairing or pairing["status"] != "ready":
+        return fail("No photo has been taken yet.", 404)
+    return send_file(io.BytesIO(pairing["photo"]), mimetype=pairing["mime"])
+
+
+# ---------------------------------------------------------------------------
 # stations 2 & 3 - image editing (same operation, different prompt)
 # ---------------------------------------------------------------------------
 
-def run_image_station(action, second_field, prompt_builder, aspect_ratio):
+def run_image_station(action, second_field, prompt_builder, aspect_ratio,
+                      reference_question):
     sid = session_id()
 
     # Validate before consuming quota, so a missing photo doesn't cost a go.
@@ -275,13 +365,19 @@ def run_image_station(action, second_field, prompt_builder, aspect_ratio):
     except limits.RateLimited as e:
         return with_session(make_response(fail(str(e), 429, e.scope)), sid)
 
-    prompt = prompt_builder(
-        request.form.get("preset_id", ""), request.form.get("request", "")
-    )
-
     try:
+        # Two calls, because MiniMax image-01 takes exactly one reference image
+        # and it has to be the person. The visitor's second photo is read by the
+        # vision model and folded into the prompt as words. See
+        # booth/minimax_image.py for what that costs in fidelity.
+        description = describe_image(second, reference_question)
+        prompt = prompt_builder(
+            request.form.get("preset_id", ""),
+            request.form.get("request", ""),
+            description,
+        )
         data, mime_type = compose_image(
-            prompt=prompt, images=[person, second], aspect_ratio=aspect_ratio
+            prompt=prompt, subject_image=person, aspect_ratio=aspect_ratio
         )
     except ImageGenError as e:
         limits.refund(sid, action)
@@ -301,14 +397,16 @@ def run_image_station(action, second_field, prompt_builder, aspect_ratio):
 @app.route("/api/edit", methods=["POST"])
 def api_edit():
     return run_image_station(
-        "edit_image", "reference", prompts.build_edit_prompt, "1:1"
+        "edit_image", "reference", prompts.build_edit_prompt, "1:1",
+        prompts.EDIT_REFERENCE_QUESTION,
     )
 
 
 @app.route("/api/scene", methods=["POST"])
 def api_scene():
     return run_image_station(
-        "scene_image", "environment", prompts.build_scene_prompt, "16:9"
+        "scene_image", "environment", prompts.build_scene_prompt, "16:9",
+        prompts.SCENE_REFERENCE_QUESTION,
     )
 
 
@@ -341,16 +439,18 @@ if __name__ == "__main__":
     print(f"  Local:  http://localhost:{port}")
     print(f"  Phones: {lan_host()}")
     print(f"  Dance provider: {get_provider()}")
-    try:
-        print(f"  Gemini image model: {resolve_model()}")
-    except Exception as e:
-        print(f"  Gemini images: NOT READY -> {e}")
-    if get_provider() == "gemini_omni":
+    print(f"  MiniMax image model: {resolve_model()}")
+    if get_provider() == "minimax":
         try:
-            info = omni_preflight()
-            print(f"  Gemini Omni: {info['model']} "
-                  f"({info['duration']}s @ {info['resolution']}, BILLED PER SECOND)")
+            info = minimax_preflight(check_key=False)
+            print(f"  MiniMax video: {info['model']} "
+                  f"({info['duration']}s @ {info['resolution']}, BILLED PER CLIP)")
         except Exception as e:
-            print(f"  Gemini Omni: NOT READY -> {e}")
+            print(f"  MiniMax video: MISCONFIGURED -> {e}")
+    try:
+        image_preflight()
+        print("  MINIMAX_API_KEY: accepted")
+    except Exception as e:
+        print(f"  MINIMAX_API_KEY: NOT READY -> {e}")
     print("=" * 62)
     app.run(host="0.0.0.0", port=port, debug=True)

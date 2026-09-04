@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Take your photo</title>
+  <style>
+    :root {
+      --bg: #080a12;
+      --panel: rgba(18, 24, 43, 0.85);
+      --line: rgba(255, 255, 255, 0.14);
+      --cyan: #00f0ff;
+      --purple: #9d4edd;
+      --green: #10b981;
+      --red: #ef4444;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 28px 24px;
+      text-align: center;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: 8px; }
+    p.sub { color: var(--muted); font-size: 0.92rem; margin-bottom: 22px; }
+
+    .preview {
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 2px dashed rgba(0, 240, 255, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .preview img { width: 100%; height: 100%; object-fit: cover; display: none; }
+    .preview img.shown { display: block; }
+    .preview .placeholder.hidden { display: none; }
+
+    input[type=file] { display: none; }
+
+    label.pick-btn, button {
+      display: block;
+      width: 100%;
+      font: inherit;
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 16px;
+      border-radius: 14px;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+    label.pick-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+    button#send-btn {
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      color: #04121a;
+    }
+    button#send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .status { font-size: 0.9rem; min-height: 22px; margin-top: 4px; }
+    .status.ok { color: var(--green); }
+    .status.error { color: #fca5a5; }
+
+    .done {
+      display: none;
+    }
+    .done.shown { display: block; }
+    .done .big { font-size: 2.4rem; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="capture-view">
+    <h1>Take your photo</h1>
+    <p class="sub">This goes straight to the booth. Then look back at the screen there.</p>
+
+    <div class="preview" id="preview">
+      <span class="placeholder" id="placeholder">No photo yet</span>
+      <img id="preview-img" alt="" />
+    </div>
+
+    <label class="pick-btn" for="file-input">📷 Take / choose photo</label>
+    <input type="file" id="file-input" accept="image/*" capture="user" />
+
+    <button id="send-btn" disabled>Send to the booth</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card done" id="done-view">
+    <div class="big">✓</div>
+    <h1>Photo sent!</h1>
+    <p class="sub">Head back to the booth screen — it's ready for you.</p>
+  </div>
+
+  <script>
+    const token = window.location.pathname.split('/').pop();
+    const fileInput = document.getElementById('file-input');
+    const previewImg = document.getElementById('preview-img');
+    const placeholder = document.getElementById('placeholder');
+    const sendBtn = document.getElementById('send-btn');
+    const statusEl = document.getElementById('status');
+    let selectedFile = null;
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      selectedFile = file;
+      previewImg.src = URL.createObjectURL(file);
+      previewImg.classList.add('shown');
+      placeholder.classList.add('hidden');
+      sendBtn.disabled = false;
+      statusEl.textContent = '';
+      statusEl.className = 'status';
+    });
+
+    sendBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+      sendBtn.disabled = true;
+      statusEl.textContent = 'Sending…';
+      statusEl.className = 'status';
+
+      const form = new FormData();
+      form.append('photo', selectedFile);
+
+      try {
+        const response = await fetch(`/api/pair/${token}/photo`, { method: 'POST', body: form });
+        const data = await response.json();
+        if (!response.ok || data.status !== 'success') {
+          throw new Error(data.message || `Upload failed (${response.status}).`);
+        }
+        document.getElementById('capture-view').style.display = 'none';
+        document.getElementById('done-view').classList.add('shown');
+      } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.className = 'status error';
+        sendBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

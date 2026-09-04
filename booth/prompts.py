@@ -4,23 +4,48 @@ Prompt templates for the two image stations.
 This is the file to tune during the event - wording changes here take effect on
 the next request, no restart needed beyond reloading the Flask dev server.
 
-The identity clause is the load-bearing part. Image models drift towards
-"generic attractive person" unless you keep telling them not to, and at a booth
-the single thing that makes or breaks the demo is whether visitors recognise
-themselves in the output.
+Two things shape everything here:
+
+1. The identity clause is load-bearing. Image models drift towards "generic
+   attractive person" unless you keep telling them not to, and at a booth the
+   single thing that makes or breaks the demo is whether visitors recognise
+   themselves in the output.
+
+2. MiniMax image-01 takes ONE reference image and a text prompt, with a prompt
+   budget around 1500 characters. The visitor's second photo therefore arrives
+   here as a *description* produced by the vision model, not as an image. So
+   the rules below are deliberately terse - every character spent on style
+   advice is a character not spent describing the visitor's actual reference.
 """
 
+# Short on purpose. See note 2 above.
 IDENTITY_RULE = (
-    "Critically important: preserve the exact facial identity, bone structure, "
-    "skin tone, hairstyle and apparent age of every person from the first photo. "
-    "They must be immediately recognisable as the same people. Do not beautify, "
-    "slim, lighten, or otherwise alter their faces or bodies."
+    "Keep the person's face, bone structure, skin tone, hairstyle and apparent "
+    "age exactly as in the reference photo - they must be instantly "
+    "recognisable. Do not beautify, slim or lighten them."
 )
 
 QUALITY_RULE = (
-    "Photorealistic, natural lighting that matches the scene, correct perspective "
-    "and scale, believable contact shadows where people meet the ground. "
-    "Sharp focus on faces. No text, no watermarks, no extra limbs or fingers."
+    "Photorealistic. Natural light matching the scene, believable contact "
+    "shadows, sharp focus on the face. No text, no watermark, no extra limbs."
+)
+
+# What the vision model is asked about the visitor's SECOND photo. The answer is
+# pasted into the image prompt, so it must be compact and visual - no preamble,
+# no "this image shows", no interpretation.
+EDIT_REFERENCE_QUESTION = (
+    "Describe only the visual style of this image in under 60 words, as a list "
+    "of concrete visual attributes: clothing and its colours and materials, art "
+    "style or medium, colour grading, lighting, and era if evident. Do not "
+    "describe any person's identity or face. Reply with the description only, "
+    "no preamble."
+)
+
+SCENE_REFERENCE_QUESTION = (
+    "Describe this place in under 60 words as concrete visual detail: the type "
+    "of location, its architecture and materials, colours, notable objects, "
+    "time of day and weather. Do not mention any people. Reply with the "
+    "description only, no preamble."
 )
 
 # Station 2 - person photo + reference photo + what they want changed.
@@ -30,8 +55,8 @@ EDIT_PRESETS = [
         "name": "Wear this outfit",
         "emoji": "👗",
         "instruction": (
-            "Dress the people from the first photo in the clothing shown in the "
-            "second photo. Keep their pose, body shape and the original background."
+            "Dress the person in the clothing described in the reference below. "
+            "Keep their pose and a simple, clean background."
         ),
     },
     {
@@ -39,18 +64,17 @@ EDIT_PRESETS = [
         "name": "Match this art style",
         "emoji": "🎨",
         "instruction": (
-            "Re-render the first photo in the artistic style of the second photo. "
-            "Keep the composition and everyone's likeness intact."
+            "Render the person in the artistic style described in the reference "
+            "below, keeping their likeness intact."
         ),
     },
     {
         "id": "add_person",
-        "name": "Put us together",
+        "name": "Studio portrait",
         "emoji": "🫂",
         "instruction": (
-            "Combine the people from both photos into one natural group portrait, "
-            "as though they were photographed together at the same moment. "
-            "Match lighting and colour grading across both."
+            "Create a natural portrait of the person in the setting and mood "
+            "described in the reference below."
         ),
     },
     {
@@ -58,9 +82,8 @@ EDIT_PRESETS = [
         "name": "Time travel",
         "emoji": "⏳",
         "instruction": (
-            "Restyle the people from the first photo to fit the time period and "
-            "mood of the second photo, including period-appropriate clothing, "
-            "hair and film grain."
+            "Restyle the person to fit the time period and mood described in the "
+            "reference below, with period-appropriate clothing, hair and film grain."
         ),
     },
 ]
@@ -72,8 +95,8 @@ SCENE_PRESETS = [
         "name": "Put me here",
         "emoji": "📍",
         "instruction": (
-            "Place the people from the first photo naturally into the environment "
-            "from the second photo, at a believable size and standing position."
+            "Place the person naturally into the location described below, at a "
+            "believable size and standing position."
         ),
     },
     {
@@ -81,8 +104,8 @@ SCENE_PRESETS = [
         "name": "Golden hour",
         "emoji": "🌅",
         "instruction": (
-            "Place the people from the first photo into the environment from the "
-            "second photo, relit for warm golden-hour sunlight with long soft shadows."
+            "Place the person into the location described below, relit for warm "
+            "golden-hour sunlight with long soft shadows."
         ),
     },
     {
@@ -90,9 +113,8 @@ SCENE_PRESETS = [
         "name": "Festive makeover",
         "emoji": "🎉",
         "instruction": (
-            "Place the people from the first photo into the environment from the "
-            "second photo, and decorate that environment for a lively community "
-            "celebration with lights, banners and greenery."
+            "Place the person into the location described below, decorated for a "
+            "lively community celebration with lights, banners and greenery."
         ),
     },
     {
@@ -100,9 +122,9 @@ SCENE_PRESETS = [
         "name": "Dream upgrade",
         "emoji": "✨",
         "instruction": (
-            "Place the people from the first photo into the environment from the "
-            "second photo, reimagining that space as a beautifully renovated, "
-            "welcoming version of itself while keeping its recognisable layout."
+            "Place the person into the location described below, reimagined as a "
+            "beautifully renovated, welcoming version of itself while keeping "
+            "its recognisable layout."
         ),
     },
 ]
@@ -115,37 +137,41 @@ def _find(presets, preset_id):
     return None
 
 
-def build_edit_prompt(preset_id, user_request=""):
-    """First photo = the visitor. Second photo = their reference."""
+def _assemble(base, reference_description, user_request, extra=None):
+    parts = [base]
+    if reference_description:
+        parts.append(f"Reference: {reference_description.strip()}")
+    if extra:
+        parts.append(extra)
+    if user_request and user_request.strip():
+        parts.append(f"The visitor asked for: {user_request.strip()}")
+    parts += [IDENTITY_RULE, QUALITY_RULE]
+    return "\n\n".join(parts)
+
+
+def build_edit_prompt(preset_id, user_request="", reference_description=""):
+    """
+    Subject = the visitor's photo (sent as the character reference).
+    reference_description = the vision model's read of their second photo.
+    """
     preset = _find(EDIT_PRESETS, preset_id)
     base = preset["instruction"] if preset else (
-        "Edit the first photo using the second photo as the reference for what to change."
+        "Restyle the person according to the reference described below."
     )
-    parts = [
-        "You are given two photos. The FIRST is the visitor (and their family). "
-        "The SECOND is their reference image.",
-        base,
-    ]
-    if user_request.strip():
-        parts.append(f"The visitor specifically asked for: {user_request.strip()}")
-    parts += [IDENTITY_RULE, QUALITY_RULE]
-    return "\n\n".join(parts)
+    return _assemble(base, reference_description, user_request)
 
 
-def build_scene_prompt(preset_id, user_request=""):
-    """First photo = the visitor. Second photo = the environment."""
+def build_scene_prompt(preset_id, user_request="", reference_description=""):
+    """
+    Subject = the visitor's photo (sent as the character reference).
+    reference_description = the vision model's read of their environment photo.
+    """
     preset = _find(SCENE_PRESETS, preset_id)
     base = preset["instruction"] if preset else (
-        "Place the people from the first photo into the environment from the second photo."
+        "Place the person into the location described below."
     )
-    parts = [
-        "You are given two photos. The FIRST is the visitor (and their family). "
-        "The SECOND is a real place.",
-        base,
-        "Keep the environment recognisably the same location - a visitor should "
-        "still be able to tell where it is.",
-    ]
-    if user_request.strip():
-        parts.append(f"The visitor specifically asked for: {user_request.strip()}")
-    parts += [IDENTITY_RULE, QUALITY_RULE]
-    return "\n\n".join(parts)
+    return _assemble(
+        base, reference_description, user_request,
+        extra="Keep the location recognisably itself - a visitor should still be "
+              "able to tell where it is.",
+    )

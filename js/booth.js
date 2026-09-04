@@ -82,6 +82,9 @@ const state = {
   secondaryFile: null
 };
 
+// Stations that offer "scan to use your phone camera" for the primary photo.
+const PHONE_PAIR_STATIONS = new Set(['dance']);
+
 // --------------------------------------------------------------------------
 // navigation
 // --------------------------------------------------------------------------
@@ -128,6 +131,8 @@ function openStation(key) {
   el('preset-label').textContent = station.presetLabel;
   el('request-block').hidden = !station.showRequest;
 
+  el('phone-pair-btn').hidden = !PHONE_PAIR_STATIONS.has(key);
+
   renderPresets(station);
   resetStation();
   show('station');
@@ -170,6 +175,7 @@ function resetStation() {
     });
   });
 
+  stopPhonePairing();
   updateQuotaNote();
   updateGenerateButton();
 }
@@ -233,6 +239,95 @@ function updateQuotaNote() {
   const label = action === 'dance_custom' ? 'custom dance clips' : 'goes';
   el('quota-note').textContent =
     `${quota.session_remaining} of ${quota.session_limit} ${label} left for you today.`;
+}
+
+// --------------------------------------------------------------------------
+// phone pairing - "scan to take the photo on your phone"
+// --------------------------------------------------------------------------
+
+let pairToken = null;
+let pairPollTimer = null;
+
+el('phone-pair-btn').addEventListener('click', startPhonePairing);
+el('phone-pair-cancel').addEventListener('click', () => stopPhonePairing());
+
+async function startPhonePairing() {
+  el('phone-pair-btn').hidden = true;
+  el('phone-pair-panel').hidden = false;
+  el('phone-pair-status').textContent = 'Scan with your phone, then take a photo there.';
+
+  try {
+    const response = await fetch('/api/pair/new', { method: 'POST' });
+    if (!response.ok) throw new Error('Could not start pairing.');
+    const data = await response.json();
+
+    pairToken = data.token;
+    el('phone-pair-qr').src = data.qr_code_base64;
+    pairPollTimer = setInterval(() => pollPairing(pairToken), 2000);
+  } catch (err) {
+    el('phone-pair-status').textContent = err.message;
+    stopPhonePairing();
+  }
+}
+
+async function pollPairing(token) {
+  if (token !== pairToken) return;
+  try {
+    const response = await fetch(`/api/pair/${token}/status`);
+    if (response.status === 404) {
+      el('phone-pair-status').textContent = 'That QR code expired. Try again.';
+      stopPhonePairing();
+      return;
+    }
+    const data = await response.json();
+    if (data.status === 'ready') await usePairedPhoto(token);
+  } catch (err) {
+    // Transient network hiccup - the next poll will retry.
+  }
+}
+
+async function usePairedPhoto(token) {
+  stopPolling();
+  el('phone-pair-status').textContent = 'Fetching your photo…';
+
+  try {
+    const response = await fetch(`/api/pair/${token}/photo`);
+    if (!response.ok) throw new Error('Could not fetch the photo from your phone.');
+    const blob = await response.blob();
+    const file = new File([blob], 'phone-photo.jpg', { type: blob.type || 'image/jpeg' });
+
+    const slot = el('slot-primary');
+    const url = URL.createObjectURL(file);
+    const img = slot.querySelector('img.slot-preview');
+    img.src = url;
+    img.classList.add('shown');
+    slot.classList.add('filled');
+    slot.querySelector('.slot-hint').textContent = '✓ From your phone';
+
+    state.primaryFile = file;
+    updateGenerateButton();
+    updateQuotaNote();
+
+    el('phone-pair-panel').hidden = true;
+    pairToken = null;
+  } catch (err) {
+    el('phone-pair-status').textContent = err.message;
+    pairPollTimer = setInterval(() => pollPairing(token), 2000);
+  }
+}
+
+function stopPolling() {
+  if (pairPollTimer) clearInterval(pairPollTimer);
+  pairPollTimer = null;
+}
+
+function stopPhonePairing() {
+  stopPolling();
+  pairToken = null;
+  el('phone-pair-panel').hidden = true;
+  if (state.station && PHONE_PAIR_STATIONS.has(state.station)) {
+    el('phone-pair-btn').hidden = false;
+  }
 }
 
 // --------------------------------------------------------------------------

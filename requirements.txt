@@ -15,15 +15,12 @@ flask==3.1.3
 flask-cors==6.0.5
 python-dotenv==1.2.3
 
-# Gemini image generation (Stations 2 and 3).
-# 2.x is required: the code uses client.models.generate_content with
-# response_modalities and types.ImageConfig, which 1.x does not have.
-google-genai==2.20.0
-
 # Image handling: EXIF rotation, downscaling, re-encoding uploads.
 pillow==12.3.0
 
-# Replicate REST calls for the dance station.
+# All MiniMax calls are plain REST over HTTPS, so there is no vendor SDK to
+# install - `requests` is the only client needed. (Also used by the optional
+# Replicate dance provider.)
 requests==2.34.2
 
 # QR codes for the "scan to save it" step. The [pil] extra provides the
