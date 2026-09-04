@@ -40,7 +40,8 @@ cp .env.example .env                # then edit .env — see the next section
 python booth_app.py
 ```
 
-Open <http://localhost:5000>.
+Open <http://localhost:5000>. For a click-by-click walkthrough of running the
+server and generating something from the UI, see [`instructions.md`](instructions.md).
 
 Install [ffmpeg](https://ffmpeg.org/download.html) and put it on your PATH too.
 It is not optional for both halves of the booth:
@@ -238,6 +239,13 @@ fails with a readable message instead of an opaque HTTP 400:
   real outcome in `base_resp.status_code`. Checking only the HTTP status is the
   classic way to "succeed" with no output, so every call goes through
   `booth/minimax_client.py`, which checks both that and the v2 error envelope.
+- ⚠️ **`MiniMax-M3` is a reasoning model**: it prefixes every answer with a
+  `<think>...</think>` block before the actual text. `describe_image()` in
+  [`booth/minimax_image.py`](booth/minimax_image.py) requests **1024 tokens**
+  (not the vision-call default of a few hundred) so the model has room to
+  finish reasoning *and* answer, and strips the `<think>` block before the
+  description is used as a prompt. A too-small `max_tokens` here silently
+  returns nothing but reasoning text — see Part 9.
 
 ### ⚠️ The one limitation worth knowing before you promise anything
 
@@ -270,6 +278,35 @@ Set `DANCE_PROVIDER` in `.env`:
 `replicate` needs driving videos in `dance_templates/` for the built-in
 templates — see [`dance_templates/README.md`](dance_templates/README.md).
 MiniMax does not; it works from the template's text prompt.
+
+### Scan-to-phone photo capture (Station 1 only)
+
+The kiosk laptop usually has no camera worth using, so visitors can pair their
+own phone instead of uploading a file from the laptop:
+
+```
+kiosk: "📱 Use your phone camera instead" ──> POST /api/pair/new
+                                                       │
+                                          token + QR (→ /phone/<token>)
+                                                       │
+phone scans QR ──> GET /phone/<token> ──> phone_capture.html
+                                                       │
+                              visitor takes/picks a photo, taps Send
+                                                       │
+                                    POST /api/pair/<token>/photo
+                                                       │
+kiosk polls GET /api/pair/<token>/status  every 2s  ──┘ (status: pending → ready)
+                                                       │
+                              kiosk: GET /api/pair/<token>/photo
+                                                       │
+                          dropped straight into the primary photo slot
+```
+
+Pairing state is a plain in-memory dict in `booth_app.py` (`PAIRINGS`), keyed
+by a short token, with a 10-minute TTL — there is no database involved and it
+does not survive a server restart. Both devices need to reach the same
+`lan_host()` address the result-screen QR already relies on, so the same
+`BOOTH_PUBLIC_HOST` guidance in Part 2 applies here too.
 
 ---
 
@@ -357,7 +394,9 @@ Never set it at an event.
 | [`booth/prompts.py`](booth/prompts.py) | Prompt templates and presets. Identity and quality rules live here |
 | [`booth/limits.py`](booth/limits.py) | SQLite rate limiting, consume / refund / stats |
 | [`booth.html`](booth.html), [`css/booth.css`](css/booth.css), [`js/booth.js`](js/booth.js) | Kiosk UI |
+| [`phone_capture.html`](phone_capture.html) | The page a visitor's **phone** loads after scanning the Station 1 pairing QR |
 | [`generate_qr.py`](generate_qr.py) | QR generation (`qrcode` library — produces genuinely scannable codes) |
+| [`instructions.md`](instructions.md) | Step-by-step: run the server, open the UI, upload a photo, generate |
 | [`requirements.txt`](requirements.txt) | Booth dependencies, pinned to tested versions |
 
 All MiniMax calls are plain REST over HTTPS, so there is **no vendor SDK to
@@ -375,6 +414,11 @@ install** — `requests` is the only client needed.
 | `POST /api/edit` | Station 2 — `photo`, `reference`, `preset_id`, `request` |
 | `POST /api/scene` | Station 3 — `photo`, `environment`, `preset_id`, `request` |
 | `GET /outputs/<f>` · `GET /download/<f>` | View / download a result |
+| `POST /api/pair/new` | Station 1 phone pairing — mints a token + QR pointing at `/phone/<token>` |
+| `GET /phone/<token>` | Serves `phone_capture.html` to the visitor's phone |
+| `GET /api/pair/<token>/status` | Kiosk polls this — `pending` until the phone has uploaded |
+| `POST /api/pair/<token>/photo` | The phone's upload |
+| `GET /api/pair/<token>/photo` | The kiosk's fetch, once `status` is `ready` |
 
 `/api/health` probes the key **once** and reports the image stations and the
 video station separately, because the booth can run usefully with images working
@@ -474,5 +518,7 @@ inherited from a previous provider — they do not carry over.
 | The reference photo's exact jacket/place didn't come through | ⚠️ Expected on Stations 2 & 3 — see Part 4b. `image-01` takes one reference image and it has to be the person |
 | QR scans but the download times out | ✏️ `BOOTH_PUBLIC_HOST` — the phone cannot reach your LAN IP. Use a tunnel |
 | Photo descriptions are generic or ignore the image | ⚠️ `MINIMAX_TEXT_MODEL` is set to an M2.x model. Those are **text-only** and silently drop the image. Use `MiniMax-M3` |
+| `"vision model ran out of tokens while reasoning"` | `MiniMax-M3` spent its whole `max_tokens` budget on its internal `<think>` block and never reached an answer. Retry, or raise `max_tokens` in `describe_image()` calls in `booth/minimax_image.py` |
+| Phone scans the pairing QR but gets "This link has expired" | The 10-minute pairing TTL passed before the phone got there, or the kiosk was reset (`↻ Try again` / navigating away clears it). Tap "Use your phone camera instead" again for a fresh QR |
 | First request after startup hangs forever | Fixed. If it recurs, it is a lock in `booth/limits.py` — `_lock` must stay an `RLock` |
 | Which models am I on? | `python -m booth.minimax_image` prints them and validates the key |
